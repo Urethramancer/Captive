@@ -56,20 +56,28 @@ int main(void)
 		BOOL found = NO;
 		while (captive_host_event(host, &input)) if (input.kind == 1 && input.code == CAPTIVE_KEY_W) found = YES;
 		assert(found);
-		/* Letterboxing and Retina-independent hit coordinates share the same scale. */
-		[window setContentSize:NSMakeSize(1600, 800)];
-		NSView *view = window.contentView;
-		NSPoint target = [view convertPoint:NSMakePoint(260, 80) toView:nil];
-		NSEvent *mouse = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:target
-			modifierFlags:0 timestamp:0 windowNumber:window.windowNumber context:nil
-			eventNumber:0 clickCount:1 pressure:1];
-		[view mouseDown:mouse];
-		found = NO;
-		while (captive_host_event(host, &input)) if (input.kind == 3) {
-			assert(fabs(input.x - 100) < 0.01 && fabs(input.y - 80) < 0.01);
-			found = YES;
+		/* Fixed expected points exercise scaling and both letterbox directions. */
+		const struct { double width, height, mouseX, mouseY; } sizes[] = {
+			{1280, 800, 100, 80}, {1600, 800, 260, 80},
+			{1280, 1024, 100, 192}, {3840, 2160, 462, 216}, {4096, 2560, 320, 256}
+		};
+		for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+			[window setContentSize:NSMakeSize(sizes[i].width, sizes[i].height)];
+			NSView *view = window.contentView;
+			/* AppKit caps titled windows to the screen; exercise larger offscreen bounds. */
+			[view setFrameSize:NSMakeSize(sizes[i].width, sizes[i].height)];
+			NSPoint target = [view convertPoint:NSMakePoint(sizes[i].mouseX, sizes[i].mouseY) toView:nil];
+			NSEvent *mouse = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:target
+				modifierFlags:0 timestamp:0 windowNumber:window.windowNumber context:nil
+				eventNumber:0 clickCount:1 pressure:1];
+			[view mouseDown:mouse];
+			found = NO;
+			while (captive_host_event(host, &input)) if (input.kind == 3) {
+				assert(fabs(input.x - 100) < 0.01 && fabs(input.y - 80) < 0.01);
+				found = YES;
+			}
+			assert(found);
 		}
-		assert(found);
 		[window setContentSize:NSMakeSize(1280, 800)];
 		/* Stalled consumers receive a focus-reset event before fresh input. */
 		for (int i = 0; i < 129; ++i) [window.contentView keyDown:press];

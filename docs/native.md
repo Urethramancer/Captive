@@ -14,7 +14,8 @@ Build with the installed Xcode command-line tools:
 The first command creates `.build/native/libcaptive_native.a`. The second also
 links and runs a short window and silent audio lifecycle check. The run needs
 access to the logged-in macOS window and audio services. Tests check key input,
-letterboxed mouse coordinates, event overflow, image crop orientation and PNG
+letterboxed mouse coordinates at 1280×800 through offscreen 4K sizes, event
+overflow, image crop orientation and PNG
 capture pixels, unsigned 8-bit WAV caching, invalid PCM, eight-voice limits,
 pause, clearing and replay, and window closure. This does not verify final
 artwork, audible sound fidelity, fullscreen animation or an actual game session.
