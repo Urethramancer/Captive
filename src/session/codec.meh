@@ -1,5 +1,6 @@
 @mod session
 @inc json
+@inc src/savejson
 
 fn integers(values:[]int64) json.JsonValue
 {
@@ -70,7 +71,7 @@ fn numbers(v:json.JsonValue, count:int64, minimum:int64, maximum:int64) []int64,
 fn Decode(text:string) State,error
 {
 	if len(text) > 1048576 { ret nil,error("session save: payload too large") }
-	o,e = json.Parse(text)
+	o,e = savejson.Parse(text)
 	if e != nil { ret nil,e }
 	if !o.IsObject() { ret nil,error("session save: expected object") }
 	_,e = number(o.Get("schema"),1,1); if e != nil { ret nil,e }

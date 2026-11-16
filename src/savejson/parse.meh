@@ -1,0 +1,32 @@
+@mod savejson
+@inc json
+
+// Parse bounds save size and nesting before entering the recursive JSON parser.
+fn Parse(text:string) json.JsonValue,error
+{
+	if len(text)>1048576 { ret json.NewNull(),error("save: JSON exceeds size limit") }
+	depth:int64=0; quoted=false; escaped=false
+	for ch=strbytes(text)
+	{
+		if quoted
+		{
+			if escaped { escaped=false }
+			else if ch==92 { escaped=true }
+			else if ch==34 { quoted=false }
+			continue
+		}
+		if ch==34 { quoted=true }
+		else if ch==123 or ch==91
+		{
+			depth+=1
+			if depth>64 { ret json.NewNull(),error("save: JSON nesting exceeds limit") }
+		}
+		else if ch==125 or ch==93
+		{
+			depth-=1
+			if depth<0 { ret json.NewNull(),error("save: unmatched JSON delimiter") }
+		}
+	}
+	if depth!=0 or quoted { ret json.NewNull(),error("save: truncated JSON structure") }
+	ret json.Parse(text)
+}

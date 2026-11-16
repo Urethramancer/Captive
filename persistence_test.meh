@@ -2,6 +2,8 @@
 @inc os
 @inc ./src/persistence
 @inc ./src/session
+@inc src/savejson
+@inc strings
 
 fn testAtomicSaveRoundtripAndRejection(t:test.Tester)
 {
@@ -86,4 +88,30 @@ fn testDeterministicDiskContinuation(t:test.Tester)
 	paused = session.Encode(resumed)
 	for i = 0; i < 10; i += 1 { session.Tick(resumed) }
 	t.equalStr(session.Encode(resumed), paused, "pause freezes all serialised timers")
+}
+
+fn testSaveNestingBoundAndQuotedDelimiters(t:test.Tester)
+{
+	text="0"
+	for depth=0; depth<65; depth+=1 { text="["+text+"]" }
+	_,e=savejson.Parse(text)
+	t.expect(e!=nil,"reject deeply nested JSON before recursive parsing")
+	_,e=session.Decode("{\"deep\":"+text+"}")
+	t.expect(e!=nil and strings.Contains(e.str(),"nesting"),"session decoding applies nesting guard")
+	// Braces and escaped quotation marks inside strings do not affect depth.
+	_,e=savejson.Parse("{\"text\":\"[[{{\\\"quoted\\\"}}]]\"}")
+	t.expect(e==nil,"quoted delimiters and escapes remain valid")
+	_,e=savejson.Parse(text[1:len(text)-1])
+	t.expect(e==nil,"accept bounded 64-level structure")
+	f,path,e=os.CreateTemp("/tmp","captive-depth-*",0o600)
+	t.expect(e==nil,"create isolated nesting save")
+	if e!=nil { ret }
+	f.close(); defer os.Remove(path)
+	e=persistence.Save(path,"{\"safe\":true}")
+	t.expect(e==nil,"save valid baseline")
+	e=persistence.Save(path,"{\"deep\":"+text+"}")
+	t.expect(e!=nil,"refuse deeply nested snapshot")
+	loaded,e=persistence.Load(path)
+	t.expect(e==nil,"previous save survives rejected nesting")
+	t.equalStr(loaded,"{\"safe\":true}","never replace valid file with unsafe snapshot")
 }
