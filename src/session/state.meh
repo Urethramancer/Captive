@@ -1,0 +1,171 @@
+@mod session
+
+// All rates in this module are provisional remaster tuning, not recovered values.
+// The map is supplied by recovery code. This module never generates a base.
+struct Item
+{
+	Kind:string
+	Condition:int64
+	Charge:int64
+	Ammunition:int64
+	Quantity:int64
+}
+
+class Droid
+{
+	Name:string
+	// Head, torso, left arm, right arm, left leg, right leg.
+	Parts:[]int64
+	Energy:int64
+	Skills:[]int64
+	Inventory:[]Item
+	Hands:[]int64
+	Cooldowns:[]int64
+}
+
+class State
+{
+	X:int64
+	Y:int64
+	Facing:int64
+	Ticks:int64
+	Paused:bool
+	Rng:int64
+	Leader:int64
+	// Front left, front right, rear left, rear right droid indices.
+	Formation:[]int64
+	Droids:[]Droid
+	Credits:int64
+	// Zero is blocked; positive codes require a recovered map adapter.
+	Tiles:[]int64
+	Terrain:[]int64
+	Objects:[]int64
+	Details:[]int64
+	Width:int64
+	Height:int64
+	Probe:bool
+	Sabotaged:bool
+	Escaped:bool
+	SabotageTicks:int64
+}
+
+// Alive checks the head and torso, whose destruction disables a droid.
+fn Alive(d:Droid) bool
+{
+	ret d != nil and len(d.Parts) == 6 and d.Parts[0] > 0 and d.Parts[1] > 0
+}
+
+// New creates a party at an explicitly supplied walkable map coordinate.
+fn New(width:int64, height:int64, tiles:[]int64, x:int64, y:int64, seed:int64) State, error
+{
+	if width < 1 or width > 64 or height < 1 or height > 64 or len(tiles) != width * height
+	{ ret nil, error("session: invalid map dimensions") }
+	if x < 0 or x >= width or y < 0 or y >= height or tiles[y * width + x] <= 0
+	{ ret nil, error("session: entrance is not walkable") }
+	if seed < 0 or seed > 2147483647 { ret nil, error("session: invalid random state") }
+	for tile = tiles
+	{ if tile < 0 or tile > 255 { ret nil, error("session: invalid map tile") } }
+	s = new State
+	s.Width = width; s.Height = height; s.X = x; s.Y = y; s.Rng = seed
+	s.Terrain = new([]int64); s.Objects = new([]int64); s.Details = new([]int64)
+	s.Tiles = new([]int64)
+	for tile = tiles { append(s.Tiles, tile); append(s.Terrain,tile); append(s.Objects,0); append(s.Details,0) }
+	s.Formation = [0,1,2,3]
+	s.Droids = new([]Droid)
+	for i = 0; i < 4; i += 1
+	{
+		d = new Droid
+		d.Name = format("Droid {}", i + 1)
+		d.Parts = [100,100,100,100,100,100]
+		d.Energy = 100
+		d.Skills = [0,0,0,0]
+		d.Inventory = new([]Item)
+		d.Hands = [-1,-1]; d.Cooldowns = [0,0]
+		append(s.Droids, d)
+	}
+	ret s, nil
+}
+
+// NextRandom advances a bounded, serialisable deterministic generator.
+fn NextRandom(s:State, bound:int64) int64
+{
+	if bound <= 0 { ret 0 }
+	s.Rng = (s.Rng * 1103515245 + 12345) & 2147483647
+	ret s.Rng % bound
+}
+
+// SetLeader selects an operational party member.
+fn SetLeader(s:State, index:int64) error
+{
+	if s.Paused { ret error("session: paused") }
+	if index < 0 or index >= 4 or !Alive(s.Droids[index])
+	{ ret error("session: leader must be an operational droid") }
+	s.Leader = index
+	ret nil
+}
+
+// SwapFormation exchanges positions without moving equipment between droids.
+fn SwapFormation(s:State, a:int64, b:int64) error
+{
+	if s.Paused { ret error("session: paused") }
+	if a < 0 or a >= 4 or b < 0 or b >= 4 { ret error("session: invalid formation slot") }
+	tmp = s.Formation[a]; s.Formation[a] = s.Formation[b]; s.Formation[b] = tmp
+	ret nil
+}
+
+// Turn applies a single quarter turn; positive turns right.
+fn Turn(s:State, direction:int64) error
+{
+	if s.Paused or s.Escaped { ret error("session: movement unavailable") }
+	if direction != -1 and direction != 1 { ret error("session: turn must be a quarter turn") }
+	s.Facing = (s.Facing + direction + 4) % 4
+	ret nil
+}
+
+// Move applies a relative step: 0 forward, 1 right, 2 back, 3 left.
+fn Move(s:State, relative:int64) error
+{
+	if s.Paused or s.Escaped { ret error("session: movement unavailable") }
+	if relative < 0 or relative > 3 { ret error("session: invalid movement") }
+	for d = s.Droids
+	{
+		if Alive(d) and (d.Energy < 1 or (d.Parts[4] == 0 and d.Parts[5] == 0))
+		{ ret error("session: party cannot move") }
+	}
+	if !Alive(s.Droids[s.Leader]) { ret error("session: leader is disabled") }
+	direction = (s.Facing + relative) % 4
+	dx:[]int64 = [0,1,0,-1]; dy:[]int64 = [-1,0,1,0]
+	x = s.X + dx[direction]; y = s.Y + dy[direction]
+	if x < 0 or x >= s.Width or y < 0 or y >= s.Height or s.Tiles[y * s.Width + x] <= 0
+	{ ret error("session: passage blocked") }
+	s.X = x; s.Y = y
+	for d = s.Droids { if Alive(d) { d.Energy -= 1 } }
+	ret nil
+}
+
+// Tick advances exactly one simulation step, and never advances while paused.
+fn Tick(s:State)
+{
+	if s.Paused or s.Escaped { ret }
+	s.Ticks += 1
+	for d = s.Droids
+	{
+		for hand = 0; hand < 2; hand += 1
+		{ if d.Cooldowns[hand] > 0 { d.Cooldowns[hand] -= 1 } }
+	}
+	if s.Sabotaged and s.SabotageTicks > 0 { s.SabotageTicks -= 1 }
+}
+
+// Equip assigns an inventory item to one hand and prevents duplicate assignment.
+fn Equip(s:State, droid:int64, hand:int64, item:int64) error
+{
+	if s.Paused { ret error("session: paused") }
+	if droid < 0 or droid >= 4 or hand < 0 or hand > 1 { ret error("session: invalid hand") }
+	d = s.Droids[droid]
+	if item < -1 or item >= len(d.Inventory) { ret error("session: invalid inventory item") }
+	if item >= 0 and d.Hands[1-hand] == item { ret error("session: item already held") }
+	if item >= 0 and (d.Parts[hand+2] == 0 or d.Inventory[item].Condition == 0)
+	{ ret error("session: damaged hand or equipment") }
+	d.Hands[hand] = item
+	ret nil
+}

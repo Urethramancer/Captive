@@ -1,0 +1,111 @@
+@inc test
+@inc src/session
+@inc json
+
+fn party() session.State
+{
+	s,e = session.New(3,3,[0,1,0,1,1,1,0,1,0],1,1,17)
+	if e != nil { eprintln(e.str()); exit(1) }
+	ret s
+}
+
+fn testMovementAndQuarterTurns(t:test.Tester)
+{
+	for facing = 0; facing < 4; facing += 1
+	{
+		for relative = 0; relative < 4; relative += 1
+		{
+			s = party(); s.Facing = facing
+			e = session.Move(s,relative)
+			t.expect(e == nil,"walkable relative step")
+			direction = (facing+relative)%4
+			xs:[]int64 = [1,2,1,0]; ys:[]int64 = [0,1,2,1]
+			t.equal(s.X,xs[direction],"relative x")
+			t.equal(s.Y,ys[direction],"relative y")
+			t.equal(s.Droids[0].Energy,99,"movement consumes energy")
+			e = session.Move(s,relative)
+			t.expect(e != nil,"boundary blocks second step")
+			t.equal(s.Droids[0].Energy,99,"blocked move consumes no energy")
+		}
+	}
+	s = party()
+	e = session.Turn(s,-1); t.expect(e == nil,"left quarter turn")
+	t.equal(s.Facing,3,"left wraps west")
+	e = session.Turn(s,1); t.expect(e == nil,"right quarter turn")
+	t.equal(s.Facing,0,"right wraps north")
+	e = session.Turn(s,2); t.expect(e != nil,"half turn rejected")
+}
+
+fn testFormationLeadershipAndEquipment(t:test.Tester)
+{
+	s = party(); s.Droids[0].Name = "Tinker"
+	e = session.SwapFormation(s,0,3); t.expect(e == nil,"formation swap")
+	t.equal(s.Formation[0],3,"rear droid now front")
+	t.equalStr(s.Droids[0].Name,"Tinker","formation preserves identity")
+	e = session.SetLeader(s,3); t.expect(e == nil,"select leader")
+	s.Droids[1].Parts[0] = 0
+	e = session.SetLeader(s,1); t.expect(e != nil,"disabled leader rejected")
+	t.equal(s.Leader,3,"invalid leader change transactional")
+	item = new session.Item
+	item.Kind = "test tool"; item.Condition = 100; item.Quantity = 1
+	append(s.Droids[0].Inventory,item)
+	e = session.Equip(s,0,0,0); t.expect(e == nil,"equip available item")
+	e = session.Equip(s,0,1,0); t.expect(e != nil,"one item cannot occupy two hands")
+	s.Droids[0].Parts[3] = 0
+	e = session.Equip(s,0,0,-1); t.expect(e == nil,"unequip")
+	e = session.Equip(s,0,1,0); t.expect(e != nil,"destroyed arm cannot equip")
+}
+
+fn testPauseFreezesSimulationAndActions(t:test.Tester)
+{
+	s = party(); s.Sabotaged = true; s.SabotageTicks = 30
+	s.Droids[0].Cooldowns[0] = 4
+	session.Tick(s)
+	t.equal(s.Ticks,1,"fixed tick")
+	t.equal(s.SabotageTicks,29,"active timer")
+	t.equal(s.Droids[0].Cooldowns[0],3,"cooldown tick")
+	s.Paused = true; before = session.Encode(s)
+	for i = 0; i < 10; i += 1 { session.Tick(s) }
+	e = session.Move(s,0); t.expect(e != nil,"paused move rejected")
+	e = session.Turn(s,1); t.expect(e != nil,"paused turn rejected")
+	e = session.SwapFormation(s,0,1); t.expect(e != nil,"paused formation rejected")
+	t.equalStr(session.Encode(s),before,"pause preserves entire state")
+}
+
+fn testSaveContinuation(t:test.Tester)
+{
+	s = party()
+	item = new session.Item
+	item.Kind = "test tool"; item.Condition = 83; item.Charge = 9; item.Ammunition = 4; item.Quantity = 1
+	append(s.Droids[2].Inventory,item); s.Droids[2].Hands[1] = 0
+	s.Droids[2].Cooldowns[1] = 5; s.Droids[2].Skills[0] = 7
+	s.Sabotaged = true; s.Probe = true; s.SabotageTicks = 100; s.Credits = 123
+	session.NextRandom(s,50)
+	encoded = session.Encode(s)
+	loaded,e = session.Decode(encoded); t.expect(e == nil,"valid save accepted")
+	if e != nil { ret }
+	t.equalStr(session.Encode(loaded),encoded,"all fields round trip")
+	for i = 0; i < 40; i += 1
+	{
+		t.equal(session.NextRandom(s,23),session.NextRandom(loaded,23),"RNG continuation")
+		session.Tick(s); session.Tick(loaded)
+	}
+	t.equalStr(session.Encode(loaded),session.Encode(s),"timers and random continuation deterministic")
+}
+
+fn testSaveRejectsCorruptState(t:test.Tester)
+{
+	active = party(); before = session.Encode(active)
+	for key = ["width","x","rng","ticks","leader","facing"]
+	{
+		o,e = json.Parse(before); t.expect(e == nil,"fixture parses")
+		o.Set(key,json.NewNumber(-1))
+		_,e = session.Decode(json.Marshal(o)); t.expect(e != nil,"reject invalid numerical state")
+	}
+	o,e = json.Parse(before)
+	o.Set("formation",json.NewArray())
+	_,e = session.Decode(json.Marshal(o)); t.expect(e != nil,"reject invalid formation")
+	_,e = session.Decode("{bad}"); t.expect(e != nil,"reject malformed JSON")
+	_,e = session.Decode("{}"); t.expect(e != nil,"reject missing state")
+	t.equalStr(session.Encode(active),before,"corrupt load leaves active session intact")
+}

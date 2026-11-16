@@ -1,0 +1,161 @@
+@mod session
+@inc json
+
+fn integers(values:[]int64) json.JsonValue
+{
+	result = json.NewArray()
+	for value = values { result.Append(json.NewNumber(float64(value))) }
+	ret result
+}
+fn setNumber(object:json.JsonValue, key:string, value:int64)
+{ object.Set(key, json.NewNumber(float64(value))) }
+
+// Encode preserves the entire current headless state, including timers and RNG.
+fn Encode(s:State) string
+{
+	o = json.NewObject()
+	setNumber(o,"schema",1)
+	setNumber(o,"x",s.X); setNumber(o,"y",s.Y); setNumber(o,"facing",s.Facing)
+	setNumber(o,"ticks",s.Ticks); setNumber(o,"rng",s.Rng); setNumber(o,"leader",s.Leader)
+	setNumber(o,"width",s.Width); setNumber(o,"height",s.Height); setNumber(o,"credits",s.Credits)
+	setNumber(o,"sabotageTicks",s.SabotageTicks)
+	o.Set("paused",json.NewBool(s.Paused)); o.Set("probe",json.NewBool(s.Probe))
+	o.Set("sabotaged",json.NewBool(s.Sabotaged)); o.Set("escaped",json.NewBool(s.Escaped))
+	o.Set("terrain",integers(s.Terrain)); o.Set("objects",integers(s.Objects)); o.Set("details",integers(s.Details))
+	o.Set("tiles",integers(s.Tiles)); o.Set("formation",integers(s.Formation))
+	droids = json.NewArray()
+	for d = s.Droids
+	{
+		v = json.NewObject()
+		v.Set("name",json.NewString(d.Name)); setNumber(v,"energy",d.Energy)
+		v.Set("parts",integers(d.Parts)); v.Set("skills",integers(d.Skills))
+		v.Set("hands",integers(d.Hands)); v.Set("cooldowns",integers(d.Cooldowns))
+		items = json.NewArray()
+		for item = d.Inventory
+		{
+			i = json.NewObject(); i.Set("kind",json.NewString(item.Kind))
+			setNumber(i,"condition",item.Condition); setNumber(i,"charge",item.Charge)
+			setNumber(i,"ammunition",item.Ammunition); setNumber(i,"quantity",item.Quantity)
+			items.Append(i)
+		}
+		v.Set("inventory",items); droids.Append(v)
+	}
+	o.Set("droids",droids)
+	ret json.Marshal(o)
+}
+
+fn number(v:json.JsonValue, minimum:int64, maximum:int64) int64, error
+{
+	if !v.IsNumber() { ret 0,error("session save: missing integer") }
+	n = v.Num()
+	if n < float64(minimum) or n > float64(maximum) { ret 0,error("session save: integer outside bounds") }
+	result = int64(n)
+	if float64(result) != n { ret 0,error("session save: fractional integer") }
+	ret result,nil
+}
+fn numbers(v:json.JsonValue, count:int64, minimum:int64, maximum:int64) []int64,error
+{
+	if !v.IsArray() or v.Len() != count { ret nil,error("session save: invalid array length") }
+	result = new([]int64)
+	for i = 0; i < count; i += 1
+	{
+		n,e = number(v.At(i),minimum,maximum)
+		if e != nil { ret nil,e }
+		append(result,n)
+	}
+	ret result,nil
+}
+
+// Decode validates into a new session. Failure never mutates an active session.
+fn Decode(text:string) State,error
+{
+	if len(text) > 1048576 { ret nil,error("session save: payload too large") }
+	o,e = json.Parse(text)
+	if e != nil { ret nil,e }
+	if !o.IsObject() { ret nil,error("session save: expected object") }
+	_,e = number(o.Get("schema"),1,1); if e != nil { ret nil,e }
+	s = new State
+	valueWidth,e = number(o.Get("width"),1,64); if e != nil { ret nil,e }
+	s.Width = valueWidth
+	valueHeight,e = number(o.Get("height"),1,64); if e != nil { ret nil,e }
+	s.Height = valueHeight
+	valueTiles,e = numbers(o.Get("tiles"),s.Width*s.Height,0,255); if e != nil { ret nil,e }
+	s.Tiles = valueTiles
+	valueTerrain,e = numbers(o.Get("terrain"),s.Width*s.Height,0,65535); if e != nil { ret nil,e }
+	s.Terrain = valueTerrain
+	valueObjects,e = numbers(o.Get("objects"),s.Width*s.Height,0,65535); if e != nil { ret nil,e }
+	s.Objects = valueObjects
+	valueDetails,e = numbers(o.Get("details"),s.Width*s.Height,0,65535); if e != nil { ret nil,e }
+	s.Details = valueDetails
+	valueX,e = number(o.Get("x"),0,s.Width-1); if e != nil { ret nil,e }
+	s.X = valueX
+	valueY,e = number(o.Get("y"),0,s.Height-1); if e != nil { ret nil,e }
+	s.Y = valueY
+	if s.Tiles[s.Y*s.Width+s.X] <= 0 { ret nil,error("session save: party inside wall") }
+	valueFacing,e = number(o.Get("facing"),0,3); if e != nil { ret nil,e }
+	s.Facing = valueFacing
+	valueTicks,e = number(o.Get("ticks"),0,9007199254740991); if e != nil { ret nil,e }
+	s.Ticks = valueTicks
+	valueRng,e = number(o.Get("rng"),0,2147483647); if e != nil { ret nil,e }
+	s.Rng = valueRng
+	valueLeader,e = number(o.Get("leader"),0,3); if e != nil { ret nil,e }
+	s.Leader = valueLeader
+	valueCredits,e = number(o.Get("credits"),0,2147483647); if e != nil { ret nil,e }
+	s.Credits = valueCredits
+	valueSabotageTicks,e = number(o.Get("sabotageTicks"),0,2147483647); if e != nil { ret nil,e }
+	s.SabotageTicks = valueSabotageTicks
+	for key = ["paused","probe","sabotaged","escaped"]
+	{ if !o.Get(key).IsBool() { ret nil,error("session save: missing boolean") } }
+	s.Paused = o.Get("paused").Bool(); s.Probe = o.Get("probe").Bool()
+	s.Sabotaged = o.Get("sabotaged").Bool(); s.Escaped = o.Get("escaped").Bool()
+	if s.Escaped and (!s.Probe or !s.Sabotaged) { ret nil,error("session save: invalid escape progression") }
+	valueFormation,e = numbers(o.Get("formation"),4,0,3); if e != nil { ret nil,e }
+	s.Formation = valueFormation
+	seen:int64 = 0
+	for slot = s.Formation { seen |= int64(1) << slot }
+	if seen != 15 { ret nil,error("session save: duplicate formation slot") }
+	droids = o.Get("droids")
+	if !droids.IsArray() or droids.Len() != 4 { ret nil,error("session save: expected four droids") }
+	s.Droids = new([]Droid)
+	for index = 0; index < 4; index += 1
+	{
+		v = droids.At(index); d = new Droid
+		name = v.Get("name")
+		if !name.IsString() or len(name.Str()) < 1 or len(name.Str()) > 80
+		{ ret nil,error("session save: invalid droid name") }
+		d.Name = name.Str()
+		valueParts,e = numbers(v.Get("parts"),6,0,100); if e != nil { ret nil,e }
+		d.Parts = valueParts
+		valueSkills,e = numbers(v.Get("skills"),4,0,100); if e != nil { ret nil,e }
+		d.Skills = valueSkills
+		valueEnergy,e = number(v.Get("energy"),0,100); if e != nil { ret nil,e }
+		d.Energy = valueEnergy
+		valueCooldowns,e = numbers(v.Get("cooldowns"),2,0,2147483647); if e != nil { ret nil,e }
+		d.Cooldowns = valueCooldowns
+		items = v.Get("inventory")
+		if !items.IsArray() or items.Len() > 64 { ret nil,error("session save: invalid inventory") }
+		d.Inventory = new([]Item)
+		for at = 0; at < items.Len(); at += 1
+		{
+			i = items.At(at); item = new Item
+			kind = i.Get("kind")
+			if !kind.IsString() or len(kind.Str()) < 1 or len(kind.Str()) > 80
+			{ ret nil,error("session save: invalid item kind") }
+			item.Kind = kind.Str()
+			valueCondition,e = number(i.Get("condition"),0,100); if e != nil { ret nil,e }
+			item.Condition = valueCondition
+			valueCharge,e = number(i.Get("charge"),0,2147483647); if e != nil { ret nil,e }
+			item.Charge = valueCharge
+			valueAmmunition,e = number(i.Get("ammunition"),0,2147483647); if e != nil { ret nil,e }
+			item.Ammunition = valueAmmunition
+			valueQuantity,e = number(i.Get("quantity"),1,2147483647); if e != nil { ret nil,e }
+			item.Quantity = valueQuantity
+			append(d.Inventory,item)
+		}
+		valueHands,e = numbers(v.Get("hands"),2,-1,len(d.Inventory)-1); if e != nil { ret nil,e }
+		d.Hands = valueHands
+		if d.Hands[0] >= 0 and d.Hands[0] == d.Hands[1] { ret nil,error("session save: item held twice") }
+		append(s.Droids,d)
+	}
+	ret s,nil
+}
