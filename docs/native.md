@@ -46,6 +46,8 @@ belong to the host until destruction. A frame accepts up to 8192 commands and a
 host up to 1024 images. The renderer ignores invalid numeric coordinates.
 Image crops take a normalised top-left source rectangle. Frame capture writes
 a 1280×800 PNG from the retained view, without screen-recording permission.
+Images up to 320×200 use nearest-neighbour sampling to preserve original pixels;
+larger remastered images use high-quality interpolation.
 
 Audio accepts copied, finite mono float samples in [-1,1], at 8–96 kHz, from one
 frame through ten seconds. Gain is [0,1]. Each of eight player nodes reserves

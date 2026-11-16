@@ -175,12 +175,14 @@ static int key(unsigned short code)
 		} else if (command.kind == 3) {
 			NSImage *image = command.image;
 			NSSize size = image.size;
+			NSImageInterpolation interpolation = size.width <= 320 && size.height <= 200
+				? NSImageInterpolationNone : NSImageInterpolationHigh;
 			NSRect source = command.source;
 			if (!NSEqualRects(source, NSZeroRect)) source = NSMakeRect(source.origin.x * size.width,
 				(1 - source.origin.y - source.size.height) * size.height,
 				source.size.width * size.width, source.size.height * size.height);
 			[image drawInRect:command.rect fromRect:source operation:NSCompositingOperationSourceOver
-				fraction:1 respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
+				fraction:1 respectFlipped:YES hints:@{NSImageHintInterpolation: @(interpolation)}];
 		}
 	}
 	[NSGraphicsContext restoreGraphicsState];
