@@ -41,12 +41,21 @@ class State
 	Terrain:[]int64
 	Objects:[]int64
 	Details:[]int64
+	Enemies:[]Enemy
+	Loot:[]Loot
+	DoorOpen:[]int64
+	SoundEvents:[]string
+	FixtureTypes:[]int64
+	FixtureExtra:[]int64
+	TrapWall:[]int64
 	Width:int64
 	Height:int64
 	Probe:bool
 	Sabotaged:bool
 	Escaped:bool
 	SabotageTicks:int64
+	CursorCharge:int64
+	EnergySteps:int64
 }
 
 // Alive checks the head and torso, whose destruction disables a droid.
@@ -70,6 +79,9 @@ fn New(width:int64, height:int64, tiles:[]int64, x:int64, y:int64, seed:int64) S
 	s.Terrain = new([]int64); s.Objects = new([]int64); s.Details = new([]int64)
 	s.Tiles = new([]int64)
 	for tile = tiles { append(s.Tiles, tile); append(s.Terrain,tile); append(s.Objects,0); append(s.Details,0) }
+	s.Enemies = new([]Enemy); s.Loot = new([]Loot); s.DoorOpen = new([]int64); s.SoundEvents = new([]string)
+	s.FixtureTypes = new([]int64); s.FixtureExtra = new([]int64); s.TrapWall = new([]int64)
+	for at = 0; at < len(tiles); at += 1 { append(s.DoorOpen,0); append(s.FixtureTypes,-1); append(s.FixtureExtra,0); append(s.TrapWall,-1) }
 	s.Formation = [0,1,2,3]
 	s.Droids = new([]Droid)
 	for i = 0; i < 4; i += 1
@@ -136,10 +148,11 @@ fn Move(s:State, relative:int64) error
 	direction = (s.Facing + relative) % 4
 	dx:[]int64 = [0,1,0,-1]; dy:[]int64 = [-1,0,1,0]
 	x = s.X + dx[direction]; y = s.Y + dy[direction]
-	if x < 0 or x >= s.Width or y < 0 or y >= s.Height or s.Tiles[y * s.Width + x] <= 0
+	if !Walkable(s,x,y) or EnemyAt(s,x,y) >= 0
 	{ ret error("session: passage blocked") }
 	s.X = x; s.Y = y
-	for d = s.Droids { if Alive(d) { d.Energy -= 1 } }
+	s.EnergySteps = (s.EnergySteps+1)%10
+	if s.EnergySteps == 0 { for d = s.Droids { if Alive(d) { d.Energy -= 1 } } }
 	ret nil
 }
 
@@ -148,12 +161,14 @@ fn Tick(s:State)
 {
 	if s.Paused or s.Escaped { ret }
 	s.Ticks += 1
+	if s.CursorCharge > 0 { s.CursorCharge -= 1 }
 	for d = s.Droids
 	{
 		for hand = 0; hand < 2; hand += 1
 		{ if d.Cooldowns[hand] > 0 { d.Cooldowns[hand] -= 1 } }
 	}
 	if s.Sabotaged and s.SabotageTicks > 0 { s.SabotageTicks -= 1 }
+	advanceWorld(s)
 }
 
 // Equip assigns an inventory item to one hand and prevents duplicate assignment.
@@ -164,7 +179,7 @@ fn Equip(s:State, droid:int64, hand:int64, item:int64) error
 	d = s.Droids[droid]
 	if item < -1 or item >= len(d.Inventory) { ret error("session: invalid inventory item") }
 	if item >= 0 and d.Hands[1-hand] == item { ret error("session: item already held") }
-	if item >= 0 and (d.Parts[hand+2] == 0 or d.Inventory[item].Condition == 0)
+	if item >= 0 and (d.Parts[hand+2] == 0 or d.Inventory[item].Condition == 0 or d.Inventory[item].Quantity <= 0)
 	{ ret error("session: damaged hand or equipment") }
 	d.Hands[hand] = item
 	ret nil

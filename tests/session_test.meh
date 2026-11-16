@@ -22,13 +22,15 @@ fn testMovementAndQuarterTurns(t:test.Tester)
 			xs:[]int64 = [1,2,1,0]; ys:[]int64 = [0,1,2,1]
 			t.equal(s.X,xs[direction],"relative x")
 			t.equal(s.Y,ys[direction],"relative y")
-			t.equal(s.Droids[0].Energy,99,"movement consumes energy")
+			t.equal(s.Droids[0].Energy,100,"movement accumulates fractional energy")
 			e = session.Move(s,relative)
 			t.expect(e != nil,"boundary blocks second step")
-			t.equal(s.Droids[0].Energy,99,"blocked move consumes no energy")
+			t.equal(s.Droids[0].Energy,100,"blocked move consumes no energy")
 		}
 	}
 	s = party()
+	for step = 0; step < 5; step += 1 { session.Move(s,0); session.Move(s,2) }
+	t.equal(s.Droids[0].Energy,99,"ten successful steps consume one energy")
 	e = session.Turn(s,-1); t.expect(e == nil,"left quarter turn")
 	t.equal(s.Facing,3,"left wraps west")
 	e = session.Turn(s,1); t.expect(e == nil,"right quarter turn")

@@ -1,0 +1,112 @@
+@mod session
+@inc strings
+
+class Enemy
+{
+	Kind:string
+	X:int64
+	Y:int64
+	Health:[]int64
+	Armour:[]int64
+	Skill:[]int64
+	Timer:int64
+	Angry:bool
+}
+class Loot
+{
+	X:int64
+	Y:int64
+	Kind:string
+	Value:int64
+	Collected:bool
+}
+
+fn reportNumber(line:string, marker:string, digits:int64) int64,error
+{
+	at = strings.IndexOf(line,marker)
+	if at < 0 or at+len(marker)+digits > len(line) { ret 0,error("base report: missing field") }
+	ret parseCell(line[at+len(marker):at+len(marker)+digits],16,65535)
+}
+
+// Populate reads generated enemy individuals and actual item placements from the
+// original MapGen textual export. No encounters or loot are invented.
+fn Populate(s:State, text:string) error
+{
+	if len(text) > 131072 { ret error("base report: too large") }
+	enemies = new([]Enemy); loot = new([]Loot)
+	current:Enemy = nil
+	for raw = strings.SplitLines(text)
+	{
+		line = strings.Trim(raw)
+		if strings.Contains(line,"Str(.")
+		{
+			if strings.Contains(line,"(.") and !strings.Contains(line[0:1],".")
+			{
+				at = strings.IndexOf(line,"(.")
+				if at > 0 and strings.IndexOf(line,"-") >= 0
+				{
+					if at+9 > len(line) { ret error("base report: truncated group coordinate") }
+					x,e = parseCell(line[at+2:at+4],16,63); if e != nil { ret e }
+					y,e = parseCell(line[at+5:at+7],16,31); if e != nil { ret e }
+					nameEnd = strings.IndexOf(line," ")
+					if nameEnd < 1 { ret error("base report: invalid group name") }
+					current = new Enemy; current.Kind = line[:nameEnd]; current.X = x; current.Y = y
+					current.Health = new([]int64); current.Armour = new([]int64); current.Skill = new([]int64)
+					current.Timer = 60
+					append(enemies,current)
+				}
+			}
+			if current == nil { ret error("base report: individual without group") }
+			h,e = reportNumber(line,"Str(.",4); if e != nil { ret e }
+			a,e = reportNumber(line,"Arm(.",2); if e != nil { ret e }
+			k,e = reportNumber(line,"Skl(",2); if e != nil { ret e }
+			if h > 65500 or a > 253 or k > 253 or len(current.Health) >= 9 { ret error("base report: invalid individual") }
+			append(current.Health,h); append(current.Armour,a); append(current.Skill,k)
+		}
+		else if strings.HasPrefix(line,"(.")
+		{
+			if len(line) < 30 { ret error("base report: truncated item") }
+			x,e = parseCell(line[2:4],16,63); if e != nil { ret e }
+			y,e = parseCell(line[5:7],16,31); if e != nil { ret e }
+			item = new Loot; item.X = x; item.Y = y
+			if strings.Contains(line,"gold") { item.Kind = "gold" }
+			else if strings.Contains(line,"ZlotWep") { item.Kind = "zlot" }
+			else if strings.Contains(line,"Explosi") { item.Kind = "explosives" }
+			else if strings.Contains(line,"clue") { item.Kind = "clue" }
+			else { ret error("base report: unsupported original item") }
+			last = strings.Trim(line[len(line)-5:])
+			v,e = parseCell(last[:4],16,65535); if e != nil { ret e }
+			item.Value = v
+			append(loot,item)
+		}
+	}
+	if len(enemies) < 1 or len(enemies) > 64 or len(loot) > 128 { ret error("base report: invalid entity counts") }
+	s.Enemies = enemies; s.Loot = loot
+	ret nil
+}
+
+// EnemyAt returns a living group at a grid coordinate, or -1.
+fn EnemyAt(s:State, x:int64, y:int64) int64
+{
+	for index = 0; index < len(s.Enemies); index += 1
+	{
+		e = s.Enemies[index]
+		if e.X == x and e.Y == y
+		{ for health = e.Health { if health > 0 { ret index } } }
+	}
+	ret -1
+}
+
+fn forward(s:State, distance:int64) int64,int64
+{
+	dx:[]int64 = [0,1,0,-1]; dy:[]int64 = [-1,0,1,0]
+	ret s.X+dx[s.Facing]*distance,s.Y+dy[s.Facing]*distance
+}
+
+// FrontCell returns the grid index immediately ahead, or -1 at an edge.
+fn FrontCell(s:State) int64
+{
+	x,y = forward(s,1)
+	if x < 0 or x >= s.Width or y < 0 or y >= s.Height { ret -1 }
+	ret y*s.Width+x
+}

@@ -1,0 +1,39 @@
+@mod session
+
+fn atShop(s:State) bool
+{
+	cell = FrontCell(s)
+	ret cell >= 0 and (s.Objects[cell]&127) == 0x12 and canAct(s) and !s.Sabotaged
+}
+
+// Repair restores a body part at an original shop. The price of one gold per
+// condition point is provisional until the original pricing formula is recovered.
+fn Repair(s:State,droid:int64,part:int64) string,error
+{
+	if !atShop(s) { ret "",error("shop: face an operational shop") }
+	if droid < 0 or droid >= 4 or part < 0 or part >= 6 { ret "",error("shop: invalid body part") }
+	cost = 100-s.Droids[droid].Parts[part]
+	if cost == 0 { ret "",error("shop: body part already repaired") }
+	if s.Credits < cost { ret "",error("shop: insufficient gold") }
+	s.Credits -= cost; s.Droids[droid].Parts[part] = 100
+	append(s.SoundEvents,"shop")
+	ret format("Body part repaired for {} gold",cost),nil
+}
+
+// Sell exchanges an eligible clipboard at a shop. Zlots and the planet probe
+// cannot be sold. Clue2 is worth the documented500; message pricing provisional.
+fn Sell(s:State,droid:int64,item:int64) string,error
+{
+	if !atShop(s) { ret "",error("shop: face an operational shop") }
+	if droid < 0 or droid >= 4 or item < 0 or item >= len(s.Droids[droid].Inventory)
+	{ ret "",error("shop: invalid inventory item") }
+	i = s.Droids[droid].Inventory[item]
+	if i.Quantity == 0 or i.Kind != "clue" { ret "",error("shop: item cannot be sold") }
+	price:int64 = 200
+	if i.Charge == 2 { price = 500 }
+	i.Quantity -= 1; s.Droids[droid].Inventory[item] = i; s.Credits += price
+	for hand = 0; hand < 2; hand += 1
+	{ if s.Droids[droid].Hands[hand] == item { s.Droids[droid].Hands[hand] = -1 } }
+	append(s.SoundEvents,"shop")
+	ret format("Clipboard sold for {} gold",price),nil
+}

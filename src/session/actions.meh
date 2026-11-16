@@ -1,0 +1,279 @@
+@mod session
+@inc strings
+
+// InitialiseParty names the four independent chips. Original name-derived stats
+// are not yet recovered; condition and starting energy are provisional.
+fn InitialiseParty(s:State,names:[]string) error
+{
+	if s.Ticks != 0 or len(names) != 4 { ret error("party: four names required before play") }
+	for name = names
+	{ if len(strings.Trim(name)) < 1 or len(name) > 80 { ret error("party: names must contain 1 to 80 characters") } }
+	for i = 0; i < 4; i += 1 { s.Droids[i].Name = strings.Trim(names[i]) }
+	ret nil
+}
+
+fn canAct(s:State) bool { ret !s.Paused and !s.Escaped and Alive(s.Droids[s.Leader]) }
+// Collect picks up actual original loot on the party cell; a living encounter
+// retains its drops. Original Zlot packed bits remain in Charge for inspection.
+fn Collect(s:State) string,error
+{ ret collectAt(s,s.X,s.Y) }
+
+fn collectAt(s:State,x:int64,y:int64) string,error
+{
+	if !canAct(s) { ret "",error("items: party unavailable") }
+	if EnemyAt(s,x,y) >= 0 { ret "",error("items: encounter guards these items") }
+	count:int64 = 0
+	for loot = s.Loot
+	{
+		if !loot.Collected and loot.X == x and loot.Y == y
+		{
+			if loot.Kind == "gold" { s.Credits += loot.Value }
+			else
+			{
+				d = s.Droids[s.Leader]
+				if len(d.Inventory) >= 64 { ret "",error("items: inventory full") }
+				i = new Item; i.Kind = loot.Kind; i.Condition = 100; i.Quantity = 1; i.Charge = loot.Value
+				// Item36 is Zlot1.9 (Knuckle-Duster); low packedbyte is endurance.
+				if i.Kind == "zlot" { i.Kind = "zlot-1.9"; i.Condition = conditionPercent(loot.Value & 255); i.Ammunition = 0 }
+				append(d.Inventory,i)
+			}
+			loot.Collected = true; count += 1
+		}
+	}
+	if count == 0 { ret "",error("items: nothing here to collect") }
+	append(s.SoundEvents,"pickup")
+	ret format("Collected {} item(s)",count),nil
+}
+
+// Interact uses the recovered fixture directly in front of the party.
+fn Interact(s:State) string,error
+{
+	if !canAct(s) { ret "",error("world: party unavailable") }
+	cell = FrontCell(s)
+	if cell < 0 { ret "",error("world: map edge") }
+	if s.FixtureTypes[cell] == 0
+	{ if s.Sabotaged { ret "",error("socket: offline after sabotage") }; s.CursorCharge = 4200; append(s.SoundEvents,"charge"); ret "Leader hand charged; click spark to discharge",nil }
+	object = s.Objects[cell] & 127
+	if object == 0x15
+	{
+		if s.Sabotaged { ret "",error("door: controls disabled by sabotage") }
+		if s.DoorOpen[cell] == 0
+		{
+			// Base zero has button doors(type5) and blue doors(type0).
+			type = (s.Objects[cell] >> 8) & 7
+			if type == 5 { s.DoorOpen[cell] = -1 }
+			else if type == 0 { s.DoorOpen[cell] = 180 }
+			else { ret "",error("door: subtype has not been recovered") }
+		}
+		else { s.DoorOpen[cell] = 0 }
+		append(s.SoundEvents,"door")
+		ret "Door operated",nil
+	}
+	if object == 0x0e
+	{
+		x,y = forward(s,2)
+		if x < 0 or x >= s.Width or y < 0 or y >= s.Height { ret "",error("wall: no room to push") }
+		destination = y*s.Width+x
+		if (!Walkable(s,x,y) and (s.Objects[destination]&127) != 0x21) or EnemyAt(s,x,y) >= 0 { ret "",error("wall: blocked behind") }
+		s.Objects[destination] = s.Objects[cell]; s.Objects[cell] = 7
+		s.Tiles[cell] = 1; s.Tiles[destination] = 1
+		append(s.SoundEvents,"wall")
+		ret "Wall pushed",nil
+	}
+	if object == 0x13
+	{
+		if s.Sabotaged { ret "",error("computer: offline after sabotage") }
+		known = false
+		for d = s.Droids { for i = d.Inventory { if i.Kind == "clue" and i.Charge == 2 { known = true } } }
+		if !known { ret "",error("computer: find the password held by Brains") }
+		if s.Probe { ret "Probe already recovered",nil }
+		d = s.Droids[s.Leader]
+		if len(d.Inventory) >= 64 { ret "",error("computer: inventory full") }
+		i = new Item; i.Kind = "probe"; i.Condition = 100; i.Quantity = 1
+		append(d.Inventory,i); s.Probe = true
+		append(s.SoundEvents,"computer")
+		ret "Password accepted; planet probe recovered",nil
+	}
+	if object == 9
+	{
+		if s.Sabotaged { ret "Generators already sabotaged",nil }
+		d:int64 = -1; i:int64 = -1
+		for party = 0; party < 4; party += 1
+		{ for slot = s.Droids[party].Hands
+		{ if slot >= 0 and s.Droids[party].Inventory[slot].Kind == "explosives" and s.Droids[party].Inventory[slot].Quantity > 0 { d = party; i = slot } } }
+		if d < 0 { ret "",error("generator: hold explosives in a droid hand") }
+		item = s.Droids[d].Inventory[i]; item.Quantity -= 1; s.Droids[d].Inventory[i] = item
+		for hand = 0; hand < 2; hand += 1 { if s.Droids[d].Hands[hand] == i { s.Droids[d].Hands[hand] = -1 } }
+		s.Sabotaged = true; s.SabotageTicks = 60*120
+		// Blue doors fail open; button doors retain their current state.
+		for at = 0; at < len(s.Objects); at += 1
+		{ if (s.Objects[at]&127) == 0x15 and ((s.Objects[at]>>8)&7) == 0 { s.DoorOpen[at] = -1 } }
+		append(s.SoundEvents,"sabotage")
+		ret "Generators sabotaged — return to the entrance",nil
+	}
+	if object == 0x12 { ret "Shop: trade and repair",nil }
+	if object == 0x22
+	{
+		if s.TrapWall[cell] >= 0
+		{
+			wall = s.TrapWall[cell]; s.Tiles[wall] = 1; s.Objects[wall] = 7; s.TrapWall[cell] = -1
+			append(s.SoundEvents,"wall")
+		}
+		ret collectAt(s,cell%s.Width,cell/s.Width)
+	}
+	if cell == 30 and s.Width == 64
+	{
+		if !s.Probe or !s.Sabotaged { ret "",error("exit: recover the probe and sabotage the generators") }
+		if s.SabotageTicks <= 0 { ret "",error("exit: base destruction overtook the party") }
+		s.Escaped = true; append(s.SoundEvents,"escape")
+		ret "Base destroyed; party escaped with the planet probe",nil
+	}
+	ret Collect(s)
+}
+
+// Walkable includes dynamic doors, moving walls, fixtures and occupied cells.
+fn Walkable(s:State,x:int64,y:int64) bool
+{
+	if x < 0 or x >= s.Width or y < 0 or y >= s.Height { ret false }
+	at = y*s.Width+x; object = s.Objects[at]&127
+	if s.Tiles[at] == 0 or object == 0x0e { ret false }
+	if object == 0x15 and s.DoorOpen[at] == 0 { ret false }
+	ret true
+}
+
+// Attack resolves the foremost surviving original individual. Combat damage,
+// cooldowns and AI pacing are provisional; generated strength/armour stay exact.
+fn Attack(s:State,droid:int64,hand:int64) string,error
+{
+	if !canAct(s) or droid < 0 or droid >= 4 or hand < 0 or hand > 1 { ret "",error("combat: invalid hand") }
+	d = s.Droids[droid]
+	if !Alive(d) or d.Parts[hand+2] == 0 or d.Cooldowns[hand] > 0 or d.Energy <= 0
+	{ ret "",error("combat: hand unavailable") }
+	range:int64 = 1; damage:int64 = 18; itemIndex = d.Hands[hand]
+	if itemIndex >= 0
+	{
+		i = d.Inventory[itemIndex]
+		if i.Kind == "zlot-1.9" { range = 1; damage = 200+((i.Charge>>13)&7)*25 }
+		else { ret "",error("combat: held item is not a weapon") }
+		if i.Condition <= 0 or i.Quantity <= 0
+		{ ret "",error("combat: weapon exhausted") }
+	}
+	if range <= 2 and s.Formation[0] != droid and s.Formation[1] != droid
+	{ ret "",error("combat: melee requires front formation") }
+	blockage = FrontCell(s)
+	if blockage >= 0 and (s.Objects[blockage]&127) == 0x21
+	{ s.Objects[blockage] = 7; s.Tiles[blockage] = 1; d.Energy -= 1; d.Cooldowns[hand] = 18; append(s.SoundEvents,"hit"); ret "Shootable blockage cleared",nil }
+	target:int64 = -1
+	for distance = 1; distance <= range; distance += 1
+	{
+		x,y = forward(s,distance)
+		if !Walkable(s,x,y) { break }
+		target = EnemyAt(s,x,y)
+		if target >= 0 { break }
+	}
+	if target < 0 { ret "",error("combat: no target in reach") }
+	if itemIndex >= 0
+	{
+		i = d.Inventory[itemIndex]
+		if i.Kind == "zlot-1.9"
+		{
+			raw = (i.Charge & 255)-1
+			if raw < 0 { raw = 0 }
+			i.Charge = (i.Charge & 65280) | raw
+			i.Condition = conditionPercent(raw)
+			if NextRandom(s,1000) < 3
+			{ i.Condition = 0; i.Charge = i.Charge & 65280; d.Parts[hand+2] -= 5; if d.Parts[hand+2] < 0 { d.Parts[hand+2] = 0 } }
+			if i.Condition <= 0 { i.Quantity = 0; d.Hands[hand] = -1 }
+		}
+		d.Inventory[itemIndex] = i
+	}
+	d.Energy -= 1; d.Cooldowns[hand] = 18
+	e = s.Enemies[target]; e.Angry = true
+	for index = 0; index < len(e.Health); index += 1
+	{
+		if e.Health[index] <= 0 { continue }
+		hit = damage+d.Skills[0]+NextRandom(s,7)-e.Armour[index]/4
+		if hit < 1 { hit = 1 }
+		e.Health[index] -= hit; if e.Health[index] < 0 { e.Health[index] = 0 }
+		if e.Health[index] == 0 { d.Skills[0] += 1; if d.Skills[0] > 100 { d.Skills[0] = 100 } }
+		append(s.SoundEvents,"hit")
+		ret format("{} hit for {}",e.Kind,hit),nil
+	}
+	ret "",error("combat: encounter already defeated")
+}
+
+// Action is the shared headless command entry point for the GUI and playthroughs.
+fn Action(s:State,kind:string,a:int64,b:int64) string,error
+{
+	if kind == "pause" { s.Paused = !s.Paused; ret "Pause changed",nil }
+	if kind == "move" { e = Move(s,a); if e != nil { ret "",e }; ret "Moved",nil }
+	if kind == "turn" { e = Turn(s,a); if e != nil { ret "",e }; ret "Turned",nil }
+	if kind == "attack" { ret Attack(s,a,b) }
+	if kind == "equip-left" { e = Equip(s,a,0,b); ret "Left hand changed",e }
+	if kind == "equip-right" { e = Equip(s,a,1,b); ret "Right hand changed",e }
+	if kind == "interact" { ret Interact(s) }
+	if kind == "collect" { ret Collect(s) }
+	if kind == "repair" { ret Repair(s,a,b) }
+	if kind == "recharge-chest" { ret Charge(s,a) }
+	if kind == "spark" { ret Spark(s) }
+	if kind == "sell" { ret Sell(s,a,b) }
+	if kind == "leader" { e = SetLeader(s,a); ret "Leader changed",e }
+	if kind == "formation" { e = SwapFormation(s,a,b); ret "Formation changed",e }
+	ret "",error("session: unknown action")
+}
+
+// Charge uses an actual original socket. Droids' chests are removable in the
+// original; this interaction presents recharging directly in the selected party.
+fn Charge(s:State,droid:int64) string,error
+{
+	cell = FrontCell(s)
+	if !canAct(s) or s.Sabotaged or cell < 0 or s.FixtureTypes[cell] != 0
+	{ ret "",error("socket: face an operational power socket") }
+	if droid < 0 or droid >= 4 { ret "",error("socket: invalid droid") }
+	s.Droids[droid].Energy = 100
+	append(s.SoundEvents,"charge")
+	ret "Droid chest recharged",nil
+}
+
+// DrainSounds transfers presentation events without changing simulation time.
+fn DrainSounds(s:State) []string
+{
+	events = s.SoundEvents; s.SoundEvents = new([]string)
+	ret events
+}
+
+// Spark projects a charged leader-hand bolt up to four cells. Original charge
+// and bolt cost are4200/420; dexterity mapping is still provisional.
+fn Spark(s:State) string,error
+{
+	if !canAct(s) or s.CursorCharge < 420 { ret "",error("spark: leader hand needs a socket charge") }
+	s.CursorCharge -= 420
+	append(s.SoundEvents,"spark")
+	for distance = 1; distance <= 4; distance += 1
+	{
+		x,y = forward(s,distance)
+		if !Walkable(s,x,y) { break }
+		target = EnemyAt(s,x,y)
+		if target < 0 { continue }
+		e = s.Enemies[target]; e.Angry = true
+		damage = s.Droids[s.Leader].Skills[0]
+		if damage < 1 { damage = 1 }
+		for index = 0; index < len(e.Health); index += 1
+		{
+			if e.Health[index] <= 0 { continue }
+			e.Health[index] -= damage
+			if e.Health[index] < 0 { e.Health[index] = 0 }
+			ret format("Electric spark hits {}",e.Kind),nil
+		}
+	}
+	ret "Electric spark discharged",nil
+}
+
+// conditionPercent mirrors the original 8-bit endurance display conversion.
+fn conditionPercent(raw:int64) int64
+{
+	if raw <= 0 { ret 0 }
+	value = raw*100/256
+	if value < 1 { ret 1 }
+	ret value
+}

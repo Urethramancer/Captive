@@ -1,0 +1,35 @@
+@inc test
+@inc src/session
+@inc os
+
+fn testRecoveredMapAndReport(t:test.Tester)
+{
+	map,e = os.Readfile(".build/recovery/base0.tsv")
+	if e != nil { t.expect(false,"run recovery before original-data integration test"); ret }
+	s,e = session.LoadBase(map); t.expect(e == nil,"recovered map parses")
+	if e != nil { eprintln(e.str()); ret }
+	t.equal(s.X,30,"original entrance x"); t.equal(s.Y,1,"original entrance y")
+	t.equal(s.Tiles[2*64+18],0,"computer is a wall fixture")
+	t.equal(s.Tiles[2*64+24],0,"shop is a wall fixture")
+	report,e = os.Readfile(".build/recovery/mapgen-seed0.txt")
+	t.expect(e == nil,"generated report available")
+	if e != nil { ret }
+	e = session.Populate(s,report); t.expect(e == nil,"exact original encounters and loot parse")
+	if e != nil { eprintln(e.str()); ret }
+	t.equal(s.Enemies[0].X,19,"Brains coordinate x")
+	t.equal(s.Enemies[0].Y,2,"Brains coordinate y")
+	t.equal(s.Enemies[0].Health[0],304,"Brains exact generated strength")
+	t.equal(len(s.Enemies),24,"exact group count"); t.equal(len(s.Loot),11,"exact original item count")
+	fixtures,e = os.Readfile(".build/recovery/base0-fixtures.tsv"); t.expect(e == nil,"fixture registry available")
+	if e != nil { ret }
+	e = session.LoadFixtures(s,fixtures); t.expect(e == nil,"original fixture registry parses")
+	t.equal(s.FixtureTypes[1*64+29],0,"verified first-room socket")
+	traps,e = os.Readfile(".build/recovery/base0-traps.tsv"); t.expect(e == nil,"trap registry available")
+	if e != nil { ret }
+	e = session.LoadTraps(s,traps); t.expect(e == nil,"original traps parse")
+	t.equal(s.TrapWall[1*64+26],27,"first original cupboard releases27,0")
+	loaded,e = session.Decode(session.Encode(s)); t.expect(e == nil,"actual map state saves")
+	if e != nil { ret }
+	for i = 0; i < 360; i += 1 { session.Tick(s); session.Tick(loaded) }
+	t.equalStr(session.Encode(s),session.Encode(loaded),"actual world continues deterministically")
+}

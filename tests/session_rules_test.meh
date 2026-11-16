@@ -1,0 +1,112 @@
+@inc test
+@inc src/session
+
+fn ruleParty() session.State
+{
+	s,e = session.New(3,3,[1,1,1,1,1,1,1,1,1],1,1,23)
+	if e != nil { eprintln(e.str()); exit(1) }
+	ret s
+}
+
+fn testDynamicDoorsAndReservedPushCell(t:test.Tester)
+{
+	s = ruleParty(); s.Objects[1] = 0x0515
+	e = session.Move(s,0); t.expect(e != nil,"closed door blocks movement")
+	_,e = session.Interact(s); t.expect(e == nil,"button opens door")
+	e = session.Move(s,0); t.expect(e == nil,"open door traversable")
+	s = ruleParty(); s.Objects[4] = 0
+	// Wall in front, reserved receiver two cells ahead in a longer corridor.
+	s,e = session.New(1,4,[1,1,1,0],0,1,23); t.expect(e == nil,"push fixture")
+	s.Facing = 2; s.Objects[2] = 0x0c0e; s.Objects[3] = 0x0c21
+	_,e = session.Interact(s); t.expect(e == nil,"wall can enter its reserved cell")
+	t.equal(s.Objects[2],7,"old wall cell becomes floor")
+	t.equal(s.Objects[3],0x0c0e,"wall moves into receiver")
+	e = session.Move(s,0); t.expect(e == nil,"party enters cleared wall cell")
+}
+
+fn testFormationCombatAndConsumption(t:test.Tester)
+{
+	s = ruleParty(); enemy = new session.Enemy
+	enemy.Kind = "test encounter"; enemy.X = 1; enemy.Y = 0
+	enemy.Health = [100]; enemy.Armour = [0]; enemy.Skill = [0]; enemy.Timer = 60
+	append(s.Enemies,enemy)
+	_,e = session.Attack(s,2,0); t.expect(e != nil,"rear droid cannot punch")
+	t.equal(s.Droids[2].Energy,100,"rejected attack consumes no energy")
+	_,e = session.Attack(s,0,0); t.expect(e == nil,"front droid punches")
+	t.equal(s.Droids[0].Energy,99,"attack consumes energy")
+	t.expect(enemy.Health[0] < 100,"attack reduces actual individual health")
+	_,e = session.Attack(s,0,0); t.expect(e != nil,"cooldown blocks repeated attack")
+	s.Paused = true; before = session.Encode(s)
+	for i = 0; i < 200; i += 1 { session.Tick(s) }
+	t.equalStr(session.Encode(s),before,"pause freezes active enemy and cooldown")
+	s.Paused = false
+	loaded,e = session.Decode(session.Encode(s)); t.expect(e == nil,"enemy state reload")
+	if e != nil { ret }
+	for i = 0; i < 240; i += 1 { session.Tick(s); session.Tick(loaded) }
+	t.equalStr(session.Encode(s),session.Encode(loaded),"AI RNG and timers continue exactly")
+}
+
+fn testShopSocketAndHeldExplosives(t:test.Tester)
+{
+	s = ruleParty(); s.Objects[1] = 0x12; s.Credits = 50; s.Droids[0].Parts[2] = 70
+	_,e = session.Repair(s,0,2); t.expect(e == nil,"shop repairs part")
+	t.equal(s.Credits,20,"repair charges exactly once")
+	_,e = session.Repair(s,0,2); t.expect(e != nil,"unneeded repair rejected")
+	s.FixtureTypes[1] = 0; s.Droids[0].Energy = 3
+	_,e = session.Charge(s,0); t.expect(e == nil,"verified socket recharges chest")
+	t.equal(s.Droids[0].Energy,100,"socket restores energy")
+	s.FixtureTypes[1] = -1; s.Objects[1] = 9
+	item = new session.Item; item.Kind = "explosives"; item.Condition = 100; item.Quantity = 1
+	append(s.Droids[0].Inventory,item)
+	_,e = session.Interact(s); t.expect(e != nil,"inventory explosives insufficient")
+	e = session.Equip(s,0,0,0); t.expect(e == nil,"hold explosives")
+	_,e = session.Interact(s); t.expect(e == nil,"sabotage before probe remains possible")
+	t.expect(s.Sabotaged,"actual held explosives starts countdown")
+	t.equal(s.Droids[0].Inventory[0].Quantity,0,"explosives consumed")
+	_,e = session.Decode(session.Encode(s)); t.expect(e == nil,"consumed inventory survives save")
+	s.Objects[1] = 0x13
+	_,e = session.Interact(s); t.expect(e != nil,"computer offline after sabotage")
+}
+
+fn testCupboardTrapAndProbeAccess(t:test.Tester)
+{
+	s = ruleParty(); s.Objects[1] = 0x22; s.TrapWall[1] = 0; s.Tiles[0] = 0
+	loot = new session.Loot; loot.Kind = "gold"; loot.Value = 37; loot.X = 1; loot.Y = 0
+	append(s.Loot,loot)
+	_,e = session.Interact(s); t.expect(e == nil,"opening cupboard collects its actual contents")
+	t.equal(s.Credits,37,"cupboard gold collected once")
+	t.equal(s.Tiles[0],1,"cupboard releases the linked remote wall")
+	t.equal(s.TrapWall[1],-1,"trap fires once")
+	_,e = session.Interact(s); t.expect(e != nil,"empty cupboard cannot duplicate loot")
+	s.Objects[1] = 0x13
+	_,e = session.Interact(s); t.expect(e != nil,"computer requires recovered password")
+	item = new session.Item; item.Kind = "clue"; item.Charge = 2; item.Quantity = 1; item.Condition = 100
+	append(s.Droids[0].Inventory,item)
+	_,e = session.Interact(s); t.expect(e == nil,"Brains message gives computer password access")
+	t.expect(s.Probe,"probe recovered from computer")
+	before = len(s.Droids[0].Inventory)
+	_,e = session.Interact(s); t.expect(e == nil,"computer repeat reports existing probe")
+	t.equal(len(s.Droids[0].Inventory),before,"computer cannot duplicate probe")
+}
+
+fn testCursorSparkAndActualZlotCategory(t:test.Tester)
+{
+	s = ruleParty(); s.FixtureTypes[1] = 0; s.Droids[0].Energy = 17
+	_,e = session.Interact(s); t.expect(e == nil,"socket charges cursor")
+	t.equal(s.CursorCharge,4200,"original full hand charge")
+	t.equal(s.Droids[0].Energy,17,"touching socket does not implicitly recharge chest")
+	session.Tick(s); t.equal(s.CursorCharge,4199,"cursor charge decays")
+	_,e = session.Spark(s); t.expect(e == nil,"charged hand can fire")
+	t.equal(s.CursorCharge,3779,"spark costs420units")
+	s = ruleParty()
+	item = new session.Item; item.Kind = "zlot-1.9"; item.Charge = 0xe028; item.Condition = 15; item.Quantity = 1
+	append(s.Droids[0].Inventory,item)
+	e = session.Equip(s,0,0,0); t.expect(e == nil,"Zlot1.9 usable without skillgate orammo")
+	enemy = new session.Enemy; enemy.Kind = "test group"; enemy.X = 1; enemy.Y = 0
+	enemy.Health = [1000]; enemy.Armour = [0]; enemy.Skill = [0]; enemy.Timer = 60
+	append(s.Enemies,enemy)
+	_,e = session.Attack(s,0,0); t.expect(e == nil,"Zlot1.9 melee hit")
+	t.equal(s.Droids[0].Inventory[0].Ammunition,0,"Knuckle-Duster consumes no ammunition")
+	t.equal(s.Droids[0].Inventory[0].Charge&255,39,"Zlot raw endurance wears independently of percentage")
+	t.equal(s.Droids[0].Inventory[0].Condition,15,"correct original endurance display conversion")
+}

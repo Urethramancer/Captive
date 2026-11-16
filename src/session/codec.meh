@@ -18,10 +18,9 @@ fn Encode(s:State) string
 	setNumber(o,"x",s.X); setNumber(o,"y",s.Y); setNumber(o,"facing",s.Facing)
 	setNumber(o,"ticks",s.Ticks); setNumber(o,"rng",s.Rng); setNumber(o,"leader",s.Leader)
 	setNumber(o,"width",s.Width); setNumber(o,"height",s.Height); setNumber(o,"credits",s.Credits)
-	setNumber(o,"sabotageTicks",s.SabotageTicks)
+	setNumber(o,"sabotageTicks",s.SabotageTicks); setNumber(o,"cursorCharge",s.CursorCharge); setNumber(o,"energySteps",s.EnergySteps)
 	o.Set("paused",json.NewBool(s.Paused)); o.Set("probe",json.NewBool(s.Probe))
 	o.Set("sabotaged",json.NewBool(s.Sabotaged)); o.Set("escaped",json.NewBool(s.Escaped))
-	o.Set("terrain",integers(s.Terrain)); o.Set("objects",integers(s.Objects)); o.Set("details",integers(s.Details))
 	o.Set("tiles",integers(s.Tiles)); o.Set("formation",integers(s.Formation))
 	droids = json.NewArray()
 	for d = s.Droids
@@ -41,6 +40,7 @@ fn Encode(s:State) string
 		v.Set("inventory",items); droids.Append(v)
 	}
 	o.Set("droids",droids)
+	encodeWorld(s,o)
 	ret json.Marshal(o)
 }
 
@@ -81,12 +81,6 @@ fn Decode(text:string) State,error
 	s.Height = valueHeight
 	valueTiles,e = numbers(o.Get("tiles"),s.Width*s.Height,0,255); if e != nil { ret nil,e }
 	s.Tiles = valueTiles
-	valueTerrain,e = numbers(o.Get("terrain"),s.Width*s.Height,0,65535); if e != nil { ret nil,e }
-	s.Terrain = valueTerrain
-	valueObjects,e = numbers(o.Get("objects"),s.Width*s.Height,0,65535); if e != nil { ret nil,e }
-	s.Objects = valueObjects
-	valueDetails,e = numbers(o.Get("details"),s.Width*s.Height,0,65535); if e != nil { ret nil,e }
-	s.Details = valueDetails
 	valueX,e = number(o.Get("x"),0,s.Width-1); if e != nil { ret nil,e }
 	s.X = valueX
 	valueY,e = number(o.Get("y"),0,s.Height-1); if e != nil { ret nil,e }
@@ -104,6 +98,8 @@ fn Decode(text:string) State,error
 	s.Credits = valueCredits
 	valueSabotageTicks,e = number(o.Get("sabotageTicks"),0,2147483647); if e != nil { ret nil,e }
 	s.SabotageTicks = valueSabotageTicks
+	cursor,e = number(o.Get("cursorCharge"),0,4200); if e != nil { ret nil,e }; s.CursorCharge = cursor
+	steps,e = number(o.Get("energySteps"),0,9); if e != nil { ret nil,e }; s.EnergySteps = steps
 	for key = ["paused","probe","sabotaged","escaped"]
 	{ if !o.Get(key).IsBool() { ret nil,error("session save: missing boolean") } }
 	s.Paused = o.Get("paused").Bool(); s.Probe = o.Get("probe").Bool()
@@ -148,7 +144,7 @@ fn Decode(text:string) State,error
 			item.Charge = valueCharge
 			valueAmmunition,e = number(i.Get("ammunition"),0,2147483647); if e != nil { ret nil,e }
 			item.Ammunition = valueAmmunition
-			valueQuantity,e = number(i.Get("quantity"),1,2147483647); if e != nil { ret nil,e }
+			valueQuantity,e = number(i.Get("quantity"),0,2147483647); if e != nil { ret nil,e }
 			item.Quantity = valueQuantity
 			append(d.Inventory,item)
 		}
@@ -157,5 +153,80 @@ fn Decode(text:string) State,error
 		if d.Hands[0] >= 0 and d.Hands[0] == d.Hands[1] { ret nil,error("session save: item held twice") }
 		append(s.Droids,d)
 	}
+	e = decodeWorld(s,o); if e != nil { ret nil,e }
 	ret s,nil
+}
+
+fn encodeWorld(s:State,o:json.JsonValue)
+{
+	o.Set("terrain",integers(s.Terrain)); o.Set("objects",integers(s.Objects)); o.Set("details",integers(s.Details))
+	o.Set("doors",integers(s.DoorOpen)); o.Set("fixtureTypes",integers(s.FixtureTypes)); o.Set("fixtureExtra",integers(s.FixtureExtra)); o.Set("trapWall",integers(s.TrapWall))
+	sounds = json.NewArray(); for sound = s.SoundEvents { sounds.Append(json.NewString(sound)) }; o.Set("sounds",sounds)
+	enemies = json.NewArray()
+	for e = s.Enemies
+	{
+		v = json.NewObject(); v.Set("kind",json.NewString(e.Kind)); setNumber(v,"x",e.X); setNumber(v,"y",e.Y)
+		v.Set("health",integers(e.Health)); v.Set("armour",integers(e.Armour)); v.Set("skill",integers(e.Skill))
+		setNumber(v,"timer",e.Timer); v.Set("angry",json.NewBool(e.Angry)); enemies.Append(v)
+	}
+	o.Set("enemies",enemies)
+	items = json.NewArray()
+	for l = s.Loot
+	{
+		v = json.NewObject(); v.Set("kind",json.NewString(l.Kind)); setNumber(v,"x",l.X); setNumber(v,"y",l.Y)
+		setNumber(v,"value",l.Value); v.Set("collected",json.NewBool(l.Collected)); items.Append(v)
+	}
+	o.Set("loot",items)
+}
+
+fn decodeWorld(s:State,o:json.JsonValue) error
+{
+	terrain,e = numbers(o.Get("terrain"),s.Width*s.Height,0,65535); if e != nil { ret e }; s.Terrain = terrain
+	objects,e = numbers(o.Get("objects"),s.Width*s.Height,0,65535); if e != nil { ret e }; s.Objects = objects
+	details,e = numbers(o.Get("details"),s.Width*s.Height,0,65535); if e != nil { ret e }; s.Details = details
+	doors,e = numbers(o.Get("doors"),s.Width*s.Height,-1,2147483647); if e != nil { ret e }; s.DoorOpen = doors
+	fixtureTypes,e = numbers(o.Get("fixtureTypes"),s.Width*s.Height,-1,5); if e != nil { ret e }; s.FixtureTypes = fixtureTypes
+	fixtureExtra,e = numbers(o.Get("fixtureExtra"),s.Width*s.Height,0,255); if e != nil { ret e }; s.FixtureExtra = fixtureExtra
+	trapWall,e = numbers(o.Get("trapWall"),s.Width*s.Height,-1,s.Width*s.Height-1); if e != nil { ret e }; s.TrapWall = trapWall
+	s.Enemies = new([]Enemy); s.Loot = new([]Loot); s.SoundEvents = new([]string)
+	sounds = o.Get("sounds")
+	if !sounds.IsArray() or sounds.Len() > 1024 { ret error("session save: invalid sound queue") }
+	for i = 0; i < sounds.Len(); i += 1
+	{
+		v = sounds.At(i)
+		if !v.IsString() or len(v.Str()) > 40 { ret error("session save: invalid sound event") }
+		append(s.SoundEvents,v.Str())
+	}
+	enemies = o.Get("enemies")
+	if !enemies.IsArray() or enemies.Len() > 64 { ret error("session save: invalid enemies") }
+	for index = 0; index < enemies.Len(); index += 1
+	{
+		v = enemies.At(index); enemy = new Enemy; kind = v.Get("kind")
+		if !kind.IsString() or len(kind.Str()) < 1 or len(kind.Str()) > 40 { ret error("session save: invalid enemy kind") }
+		enemy.Kind = kind.Str()
+		x,e = number(v.Get("x"),0,s.Width-1); if e != nil { ret e }; enemy.X = x
+		y,e = number(v.Get("y"),0,s.Height-1); if e != nil { ret e }; enemy.Y = y
+		h = v.Get("health")
+		if !h.IsArray() or h.Len() < 1 or h.Len() > 9 { ret error("session save: invalid enemy group") }
+		health,e = numbers(h,h.Len(),0,65500); if e != nil { ret e }; enemy.Health = health
+		armour,e = numbers(v.Get("armour"),h.Len(),0,253); if e != nil { ret e }; enemy.Armour = armour
+		skill,e = numbers(v.Get("skill"),h.Len(),0,253); if e != nil { ret e }; enemy.Skill = skill
+		timer,e = number(v.Get("timer"),0,2147483647); if e != nil { ret e }; enemy.Timer = timer
+		angry = v.Get("angry"); if !angry.IsBool() { ret error("session save: missing enemy anger") }; enemy.Angry = angry.Bool()
+		append(s.Enemies,enemy)
+	}
+	loot = o.Get("loot")
+	if !loot.IsArray() or loot.Len() > 128 { ret error("session save: invalid loot") }
+	for index = 0; index < loot.Len(); index += 1
+	{
+		v = loot.At(index); item = new Loot; kind = v.Get("kind")
+		if !kind.IsString() or len(kind.Str()) < 1 or len(kind.Str()) > 40 { ret error("session save: invalid loot kind") }
+		item.Kind = kind.Str()
+		x,e = number(v.Get("x"),0,s.Width-1); if e != nil { ret e }; item.X = x
+		y,e = number(v.Get("y"),0,s.Height-1); if e != nil { ret e }; item.Y = y
+		value,e = number(v.Get("value"),0,65535); if e != nil { ret e }; item.Value = value
+		collected = v.Get("collected"); if !collected.IsBool() { ret error("session save: missing loot state") }; item.Collected = collected.Bool()
+		append(s.Loot,item)
+	}
+	ret nil
 }
