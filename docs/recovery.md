@@ -102,3 +102,23 @@ go test tools/mapgen-export/main.go tools/mapgen-export/main_test.go
 ```
 
 Invalid or truncated memory is rejected before replacing existing exports. The export was compared byte for byte with the first recovered TSV.
+
+Cupboard traps are now independently recovered: DOS DS:`4980` points to a 32×4-byte registry, whose count is DS:`47c2`. Seed zero has three links: cupboard (26,1) opens wall (27,0); (25,14) opens (26,13); (28,18) opens (28,20). The original routine `27418`–`274b8` stores the paired coordinates and removes the remote cell from the ordinary floor. `.build/recovery/base0-traps.tsv` preserves these records. Export them with `-traps OUTPUT.tsv`.
+
+Generators are traversable floor machinery. Amiga MapGen converter `42f2` maps raw ID `09` to runtime ID `28` (hexadecimal); the game's movement check at `5526`–`555a` explicitly blocks computers (`2e`), shops (`2c`) and shootable blockages (`2a`), while generator `28` reaches the successful branch at `5598`. Blocking all nine cells incorrectly disconnects the recovered map.
+
+All three recovered raw item `36` weapons are **Zlot 1.9**, corresponding to the Knuckle-Duster, rather than generic firearms. Main decoding at `2858` subtracts 18 from raw item codes; the name lookup subtracts one further, giving name-table index `23`. Packed words `e028`, `603e`, `c01d` encode qualities Super, IV, VII and endurance bytes 40, 62, 29 respectively. The display scales endurance by 100/256 (15%, 24%, 11%). These are melee weapons; inventing ammunition for them would materially alter the first base.
+
+The original native loader at code `767c` explicitly sets heading **2 (south)** after map generation. Starting inside at (30,1) must face the pushable wall at (30,3), with the entrance behind the party.
+
+## Shop records
+
+Main shop metadata is an eight-byte record table at decoded main code `4102`: weight/item data word, base price word, quality-increment word, availability-group byte and flags byte. The first 84 display names follow the table beginning at code `3d0e`; the remaining zero-price records are inactive. The original-derived decoded table is local only: `.build/recovery/original-shop-table.tsv`.
+
+The shop number is significant. DOS DS:`496e` points to nine ordered coordinate pairs, terminated with `ffff`. Seed zero's numbers are 1=(27,17), 2=(24,2), 3=(19,15), 4=(24,22), 5=(21,19), 6=(29,22). `.build/recovery/base0-shops.tsv` is exported with `-shops OUTPUT.tsv`. Row-major scanning would assign incorrect stock.
+
+Main routine `21b6` gates stock by availability group, current seed and shop number. For seed zero, group zero is available in all shops, armour group one is unavailable, brawling group two is available only in shop two, and groups three through nine are unavailable. In particular, swords and firearms must not be offered as first-base stock. Batteries, explosives, devices, optics, cameras, balls and ammunition use group-zero stock, subject to their record's non-zero price and quality mask.
+
+Main routine `1f50` constructs a deterministic quality mask. For ordinary stock, start with `rol16(material,4)`, add the item index, its first table word and shop number, rotate left by four, add the seed, apply `n=(n*1509+41)&ffff`, then use `(ror16(n,3)^0800)&ff`, replacing a zero mask with `80`. Basic corresponds to bit seven and Super to bit zero. The separate armour/material branch is irrelevant to seed zero's unavailable armour stock.
+
+Routine `1f90` computes quality-priced stock as `basePrice + increment*(material*32+quality)` when flags bit zero is set. Flags bit five adds the seed-dependent increment (capped at 32768 for that contribution), as for explosives. Selling and repair apply additional condition and stock-dependent adjustments in `2016`, `2036` and their callers; displaying the base price as an exact sell or repair offer would be wrong.

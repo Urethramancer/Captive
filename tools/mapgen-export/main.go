@@ -13,18 +13,20 @@ import (
 func main() {
 	segment := flag.String("ds", "", "DOS data segment, for example 0x275b; discover for each process")
 	fixtures := flag.String("fixtures", "", "also export the wall-fixture registry to this TSV")
+	traps := flag.String("traps", "", "also export cupboard-to-wall trap links to this TSV")
+	shops := flag.String("shops", "", "also export numbered shop coordinates to this TSV")
 	flag.Parse()
 	if flag.NArg() != 2 || *segment == "" {
 		fmt.Fprintln(os.Stderr, "usage: go run tools/mapgen-export/main.go -ds SEGMENT MEMORY OUTPUT.tsv")
 		os.Exit(2)
 	}
-	if err := export(*segment, flag.Arg(0), flag.Arg(1), *fixtures); err != nil {
+	if err := export(*segment, flag.Arg(0), flag.Arg(1), *fixtures, *traps, *shops); err != nil {
 		fmt.Fprintln(os.Stderr, "mapgen-export:", err)
 		os.Exit(1)
 	}
 }
 
-func export(segment, input, output, fixtures string) error {
+func export(segment, input, output, fixtures, traps, shops string) error {
 	s, err := strconv.ParseUint(segment, 0, 16)
 	if err != nil {
 		return fmt.Errorf("invalid data segment: %w", err)
@@ -41,6 +43,45 @@ func export(segment, input, output, fixtures string) error {
 		return binary.LittleEndian.Uint16(memory[base+offset:])
 	}
 	var fixtureTable bytes.Buffer
+	var trapTable bytes.Buffer
+	var shopTable bytes.Buffer
+	if shops != "" {
+		if len(memory) < base+0x4970 {
+			return fmt.Errorf("memory is truncated before the shop registry pointer")
+		}
+		start := int(word(0x496e))
+		if len(memory) < base+start+18 {
+			return fmt.Errorf("memory is truncated in the shop registry")
+		}
+		shopTable.WriteString("number\tx\ty\n")
+		for i := 0; i < 9; i++ {
+			record := memory[base+start+2*i : base+start+2*i+2]
+			if record[0] == 255 && record[1] == 255 {
+				break
+			}
+			if record[0] >= 64 || record[1] >= 32 {
+				return fmt.Errorf("invalid shop %d", i+1)
+			}
+			fmt.Fprintf(&shopTable, "%d\t%d\t%d\n", i+1, record[0], record[1])
+		}
+	}
+	if traps != "" {
+		if len(memory) < base+0x4982 {
+			return fmt.Errorf("memory is truncated before the trap registry pointer")
+		}
+		start, count := int(word(0x4980)), int(word(0x47c2))
+		if count > 32 || len(memory) < base+start+4*count {
+			return fmt.Errorf("invalid cupboard-trap registry")
+		}
+		trapTable.WriteString("cupboardX\tcupboardY\twallX\twallY\n")
+		for i := 0; i < count; i++ {
+			record := memory[base+start+4*i : base+start+4*i+4]
+			if record[0] >= 64 || record[1] >= 32 || record[2] >= 64 || record[3] >= 32 {
+				return fmt.Errorf("invalid cupboard trap %d", i)
+			}
+			fmt.Fprintf(&trapTable, "%d\t%d\t%d\t%d\n", record[0], record[1], record[2], record[3])
+		}
+	}
 	if fixtures != "" {
 		if len(memory) < base+0x4974 {
 			return fmt.Errorf("memory is truncated before the registry pointers")
@@ -76,6 +117,16 @@ func export(segment, input, output, fixtures string) error {
 	}
 	if fixtures != "" {
 		if err := writeAtomic(fixtures, fixtureTable.Bytes()); err != nil {
+			return err
+		}
+	}
+	if traps != "" {
+		if err := writeAtomic(traps, trapTable.Bytes()); err != nil {
+			return err
+		}
+	}
+	if shops != "" {
+		if err := writeAtomic(shops, shopTable.Bytes()); err != nil {
 			return err
 		}
 	}

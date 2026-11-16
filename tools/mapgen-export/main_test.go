@@ -28,7 +28,7 @@ func TestRejectInvalidMemoryWithoutReplacingOutput(t *testing.T) {
 			if err := os.WriteFile(out, before, 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := export(tc.segment, in, out, filepath.Join(dir, "fixtures.tsv")); err == nil {
+			if err := export(tc.segment, in, out, filepath.Join(dir, "fixtures.tsv"), "", ""); err == nil {
 				t.Fatal("accepted invalid memory")
 			}
 			after, err := os.ReadFile(out)
@@ -39,5 +39,45 @@ func TestRejectInvalidMemoryWithoutReplacingOutput(t *testing.T) {
 				t.Fatal("invalid memory replaced existing export")
 			}
 		})
+	}
+}
+
+func TestExportRegistries(t *testing.T) {
+	b := make([]byte, 0x5000)
+	word := func(offset int, v uint16) { binary.LittleEndian.PutUint16(b[offset:], v) }
+	word(0x1410, 30)
+	word(0x1412, 1)
+	word(0x493c, 1)
+	word(0x4972, 0x4800)
+	copy(b[0x4800:], []byte{29, 1, 0, 0})
+	word(0x47c2, 1)
+	word(0x4980, 0x4810)
+	copy(b[0x4810:], []byte{26, 1, 27, 0})
+	word(0x496e, 0x4818)
+	copy(b[0x4818:], []byte{27, 17, 24, 2, 255, 255})
+	dir := t.TempDir()
+	in := filepath.Join(dir, "memory")
+	if err := os.WriteFile(in, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{filepath.Join(dir, "map"), filepath.Join(dir, "fixtures"), filepath.Join(dir, "traps"), filepath.Join(dir, "shops")}
+	if err := export("0", in, paths[0], paths[1], paths[2], paths[3]); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"x\ty\ttype\textra\n29\t1\t0\t0\n", "cupboardX\tcupboardY\twallX\twallY\n26\t1\t27\t0\n", "number\tx\ty\n1\t27\t17\n2\t24\t2\n"} {
+		got, err := os.ReadFile(paths[i+1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("registry %d: %q", i, got)
+		}
+	}
+	got, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := bytes.Count(got, []byte{'\n'}); lines != 2049 {
+		t.Fatalf("map has %d lines", lines)
 	}
 }
