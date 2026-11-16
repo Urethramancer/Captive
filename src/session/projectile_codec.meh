@@ -1,0 +1,34 @@
+@mod session
+@inc json
+
+fn encodeProjectiles(s:State,o:json.JsonValue)
+{
+	o.Set("mines",integers(s.Mines))
+	balls = json.NewArray()
+	for ball = s.Balls
+	{
+		v = json.NewObject(); setNumber(v,"x",ball.X); setNumber(v,"y",ball.Y)
+		setNumber(v,"direction",ball.Direction); setNumber(v,"life",ball.Life); setNumber(v,"timer",ball.Timer); setNumber(v,"owner",ball.Owner)
+		balls.Append(v)
+	}
+	o.Set("balls",balls)
+}
+fn decodeProjectiles(s:State,o:json.JsonValue) error
+{
+	mines,e = numbers(o.Get("mines"),s.Width*s.Height,0,4); if e != nil { ret e }; s.Mines = mines
+	balls = o.Get("balls")
+	if !balls.IsArray() or balls.Len() > 128 { ret error("session save: invalid bouncing balls") }
+	s.Balls = new([]BouncingBall)
+	for index = 0; index < balls.Len(); index += 1
+	{
+		v = balls.At(index); ball = new BouncingBall
+		x,e = number(v.Get("x"),0,s.Width-1); if e != nil { ret e }; ball.X = x
+		y,e = number(v.Get("y"),0,s.Height-1); if e != nil { ret e }; ball.Y = y
+		direction,e = number(v.Get("direction"),0,3); if e != nil { ret e }; ball.Direction = direction
+		life,e = number(v.Get("life"),0,180); if e != nil { ret e }; ball.Life = life
+		timer,e = number(v.Get("timer"),0,6); if e != nil { ret e }; ball.Timer = timer
+		owner,e = number(v.Get("owner"),0,3); if e != nil { ret e }; ball.Owner = owner
+		append(s.Balls,ball)
+	}
+	ret nil
+}

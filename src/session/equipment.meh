@@ -33,6 +33,36 @@ fn Use(s:State,droid:int64,index:int64) string,error
 		d.Inventory[index] = item; append(s.SoundEvents,"charge")
 		ret "Battery applied to chest",nil
 	}
+	if item.Kind == "camera"
+	{
+		slot:int64 = -1
+		for at = 0; at < len(s.Cameras); at += 1 { if !s.Cameras[at].Active { slot = at; break } }
+		if slot < 0 and len(s.Cameras) >= 4 { ret "",error("camera: four active cameras already deployed") }
+		x,y = forward(s,1)
+		if !Walkable(s,x,y) or EnemyAt(s,x,y) >= 0 { ret "",error("camera: clear floor required in front of the party") }
+		c = new RemoteCamera; c.X = x; c.Y = y; c.Facing = s.Facing; c.Active = true
+		if slot < 0 { append(s.Cameras,c); slot = len(s.Cameras)-1 } else { s.Cameras[slot] = c }
+		s.CameraIndex = slot; consumeItem(d,index)
+		ret "Camera deployed; movement now controls the remote camera",nil
+	}
+	if item.Kind == "ball"
+	{
+		ball = new BouncingBall; ball.X = s.X; ball.Y = s.Y; ball.Direction = s.Facing
+		ball.Owner = droid; ball.Life = 180; ball.Timer = 6; append(s.Balls,ball); consumeItem(d,index)
+		append(s.SoundEvents,"throw"); ret "Ball thrown; beware of ricochets",nil
+	}
+	if item.Kind == "mine"
+	{
+		at = s.Y*s.Width+s.X; if s.Mines[at] != 0 { ret "",error("mine: this cell already has a mine") }
+		s.Mines[at] = droid+1; consumeItem(d,index); ret "Mine placed; move away before triggering it",nil
+	}
+	if item.Kind == "device" or item.Kind == "optic"
+	{
+		for slot = 0; slot < len(d.Inventory); slot += 1
+		{ other = d.Inventory[slot]; if slot != index and other.Kind == item.Kind { other.Enabled = false; d.Inventory[slot] = other } }
+		item.Enabled = !item.Enabled; d.Inventory[index] = item
+		ret "Module activation changed",nil
+	}
 	if item.Kind == "explosives"
 	{ e = Equip(s,droid,0,index); ret "Explosives held for generator sabotage",e }
 	ret "",error("equipment: this item is used through its hand action")

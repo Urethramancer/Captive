@@ -1,0 +1,32 @@
+@mod session
+@inc json
+
+fn encodeCameras(s:State,o:json.JsonValue)
+{
+	setNumber(o,"cameraIndex",s.CameraIndex)
+	cameras = json.NewArray()
+	for c = s.Cameras
+	{
+		v = json.NewObject(); setNumber(v,"x",c.X); setNumber(v,"y",c.Y); setNumber(v,"facing",c.Facing)
+		setNumber(v,"moveTimer",c.MoveTimer); v.Set("active",json.NewBool(c.Active)); cameras.Append(v)
+	}
+	o.Set("cameras",cameras)
+}
+fn decodeCameras(s:State,o:json.JsonValue) error
+{
+	cameras = o.Get("cameras")
+	if !cameras.IsArray() or cameras.Len() > 4 { ret error("session save: invalid cameras") }
+	selected,e = number(o.Get("cameraIndex"),-1,cameras.Len()-1); if e != nil { ret e }; s.CameraIndex = selected
+	s.Cameras = new([]RemoteCamera)
+	for index = 0; index < cameras.Len(); index += 1
+	{
+		v = cameras.At(index); c = new RemoteCamera
+		x,e = number(v.Get("x"),0,s.Width-1); if e != nil { ret e }; c.X = x
+		y,e = number(v.Get("y"),0,s.Height-1); if e != nil { ret e }; c.Y = y
+		facing,e = number(v.Get("facing"),0,3); if e != nil { ret e }; c.Facing = facing
+		timer,e = number(v.Get("moveTimer"),0,4); if e != nil { ret e }; c.MoveTimer = timer
+		active = v.Get("active"); if !active.IsBool() { ret error("session save: missing camera state") }; c.Active = active.Bool()
+		append(s.Cameras,c)
+	}
+	ret nil
+}

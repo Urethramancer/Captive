@@ -49,7 +49,7 @@ fn LoadStock(s:State,text:string) error
 // SupportedOffer prevents selling any item whose behaviour is not implemented.
 fn SupportedOffer(o:Offer) bool
 {
-	ret o.Kind == "battery" or o.Kind == "explosives" or (o.Kind == "weapon" and (o.Code == 31 or o.Code == 32))
+	ret o.Kind == "battery" or o.Kind == "explosives" or o.Kind == "ball" or o.Kind == "mine" or o.Kind == "camera" or (o.Kind == "optic" and o.Quality <= 5) or (o.Kind == "device") or (o.Kind == "weapon" and (o.Code == 31 or o.Code == 32))
 }
 
 // Buy purchases a real catalogue row from the shop directly ahead.
@@ -63,7 +63,7 @@ fn Buy(s:State,droid:int64,row:int64) string,error
 	if s.CursorCharge > 0 { ret "",error("shop: discharge the leader hand before handling items") }
 	if s.Credits < o.Price { ret "",error("shop: insufficient gold") }
 	d = s.Droids[droid]
-	i = new Item; i.Code = o.Code; i.Kind = o.Kind; i.Quality = o.Quality; i.Price = o.Price
+	i = new Item; i.Code = o.Code; i.Kind = o.Kind; i.Quality = o.Quality; i.Price = o.Price; i.Weight = o.ItemData
 	i.Condition = 100; i.Quantity = 1
 	if o.Kind == "battery" { i.Charge = 25 }
 	_,e = addInventory(d,i); if e != nil { ret "",e }; s.Credits -= o.Price; append(s.SoundEvents,"shop")

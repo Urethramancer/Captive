@@ -29,7 +29,7 @@ fn testMovementAndQuarterTurns(t:test.Tester)
 		}
 	}
 	s = party()
-	for step = 0; step < 5; step += 1 { session.Move(s,0); session.Move(s,2) }
+	for step = 0; step < 5; step += 1 { session.Move(s,0); for tick = 0; tick < 4; tick += 1 { session.Tick(s) }; session.Move(s,2); for tick = 0; tick < 4; tick += 1 { session.Tick(s) } }
 	t.equal(s.Droids[0].Energy,99,"ten successful steps consume one energy")
 	e = session.Turn(s,-1); t.expect(e == nil,"left quarter turn")
 	t.equal(s.Facing,3,"left wraps west")

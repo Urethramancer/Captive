@@ -7,7 +7,9 @@ fn InitialiseParty(s:State,names:[]string) error
 {
 	if s.Ticks != 0 or len(names) != 4 { ret error("party: four names required before play") }
 	for name = names
-	{ if len(strings.Trim(name)) < 1 or len(name) > 80 { ret error("party: names must contain 1 to 80 characters") } }
+	{ if len(name) < 1 or len(name) > 19 { ret error("party: names require1to19ASCII letters or digits") }
+		for ch = strbytes(name)
+		{ if !((ch >= 48 and ch <= 57) or (ch >= 65 and ch <= 90) or (ch >= 97 and ch <= 122)) { ret error("party: names require ASCII letters or digits") } } }
 	for i = 0; i < 4; i += 1 { s.Droids[i].Name = strings.Trim(names[i]) }
 	ret nil
 }
@@ -36,12 +38,14 @@ fn collectAt(s:State,x:int64,y:int64) string,error
 				i = new Item; i.Kind = loot.Kind; i.Condition = 100; i.Quantity = 1; i.Charge = loot.Value
 				// Item36 is Zlot1.9 (Knuckle-Duster); low packedbyte is endurance.
 				if i.Kind == "zlot" { i.Kind = "zlot-1.9"; i.Code = 54; i.Quality = (loot.Value>>13)&7; i.Condition = conditionPercent(loot.Value & 255); i.Ammunition = 0 }
-				if i.Kind == "clue" { i.Code = 102 }; if i.Kind == "explosives" { i.Code = 27 }
+				if i.Kind == "clue" { i.Code = 102; i.Weight = 120 }
+				if i.Kind == "ball" { i.Code = 96; i.Weight = 23; i.Price = 10 }; if i.Kind == "explosives" { i.Code = 27; i.Weight = 433 }
 				_,e = addInventory(d,i); if e != nil { ret "",e }
 			}
 			loot.Collected = true; count += 1
 		}
 	}
+	if count == 0 and x == s.X and y == s.Y and recoverCamera(s) { ret "Camera recovered",nil }
 	if count == 0 { ret "",error("items: nothing here to collect") }
 	append(s.SoundEvents,"pickup")
 	ret format("Collected {} item(s)",count),nil
@@ -67,7 +71,7 @@ fn Interact(s:State) string,error
 			else if type == 0 { s.DoorOpen[cell] = 180 }
 			else { ret "",error("door: subtype has not been recovered") }
 		}
-		else { s.DoorOpen[cell] = 0 }
+		else { s.DoorOpen[cell] = 0; crushDoor(s,cell) }
 		append(s.SoundEvents,"door")
 		ret "Door operated",nil
 	}
@@ -84,17 +88,10 @@ fn Interact(s:State) string,error
 	}
 	if object == 0x13
 	{
-		if s.Sabotaged { ret "",error("computer: offline after sabotage") }
 		known = false
-		for d = s.Droids { for i = d.Inventory { if i.Kind == "clue" and i.Charge == 2 { known = true } } }
-		if !known { ret "",error("computer: find the password held by Brains") }
-		if s.Probe { ret "Probe already recovered",nil }
-		d = s.Droids[s.Leader]
-		if len(d.Inventory) >= 64 { ret "",error("computer: inventory full") }
-		i = new Item; i.Kind = "probe"; i.Condition = 100; i.Quantity = 1
-		append(d.Inventory,i); s.Probe = true
-		append(s.SoundEvents,"computer")
-		ret "Password accepted; planet probe recovered",nil
+		for d = s.Droids { for i = d.Inventory { if i.Kind == "clue" and i.Charge == 2 and i.Quantity > 0 { known = true } } }
+		if !known { ret "",error("computer: enter the password or find Brains message") }
+		ret EnterPassword(s,"CHAESELUME")
 	}
 	if object == 9
 	{
@@ -190,7 +187,7 @@ fn Attack(s:State,droid:int64,hand:int64) string,error
 			i.Charge = (i.Charge & 65280) | raw
 			i.Condition = conditionPercent(raw)
 			if NextRandom(s,1000) < 3
-			{ i.Condition = 0; i.Charge = i.Charge & 65280; d.Parts[hand+2] -= 5; if d.Parts[hand+2] < 0 { d.Parts[hand+2] = 0 } }
+			{ i.Condition = 0; i.Charge = i.Charge & 65280; d.Parts[hand+2] -= Protect(s,5,"explosion"); if d.Parts[hand+2] < 0 { d.Parts[hand+2] = 0 } }
 			if i.Condition <= 0 { i.Quantity = 0; d.Hands[hand] = -1 }
 		}
 		if i.Kind == "weapon" { i.Condition -= 1; if i.Condition <= 0 { i.Quantity = 0; d.Hands[hand] = -1 } }
@@ -202,9 +199,10 @@ fn Attack(s:State,droid:int64,hand:int64) string,error
 	{
 		if e.Health[index] <= 0 { continue }
 		hit = damage+d.Skills[0]+NextRandom(s,7)-e.Armour[index]/4
+		if itemIndex >= 0 and d.Inventory[itemIndex].Kind == "zlot-1.9" { hit += 30 }
 		if hit < 1 { hit = 1 }
 		e.Health[index] -= hit; if e.Health[index] < 0 { e.Health[index] = 0 }
-		if e.Health[index] == 0 { d.Skills[0] += 1; if d.Skills[0] > 100 { d.Skills[0] = 100 } }
+		if e.Health[index] == 0 { d.Skills[0] += 1; if d.Skills[0] > 100 { d.Skills[0] = 100 }; if EnemyAt(s,e.X,e.Y) < 0 { dropGold(s,e) } }
 		append(s.SoundEvents,"hit")
 		ret format("{} hit for {}",e.Kind,hit),nil
 	}
@@ -214,10 +212,15 @@ fn Attack(s:State,droid:int64,hand:int64) string,error
 // Action is the shared headless command entry point for the GUI and playthroughs.
 fn Action(s:State,kind:string,a:int64,b:int64) string,error
 {
+	if strings.HasPrefix(kind,"password:") { ret EnterPassword(s,kind[9:]) }
 	if kind == "pause" { s.Paused = !s.Paused; ret "Pause changed",nil }
-	if kind == "move" { e = Move(s,a); if e != nil { ret "",e }; ret "Moved",nil }
-	if kind == "turn" { e = Turn(s,a); if e != nil { ret "",e }; ret "Turned",nil }
-	if kind == "attack" { ret Attack(s,a,b) }
+	if kind == "move" { if s.CameraIndex >= 0 { ret cameraMove(s,a) }; e = Move(s,a); if e != nil { ret "",e }; ret "Moved",nil }
+	if kind == "turn" { if s.CameraIndex >= 0 { ret cameraTurn(s,a) }; e = Turn(s,a); if e != nil { ret "",e }; ret "Turned",nil }
+	if kind == "camera-view" { ret cycleCamera(s) }
+	if kind == "camera-detonate" { ret detonateCamera(s) }
+	if kind == "camera-move" { ret cameraMove(s,a) }
+	if kind == "camera-turn" { ret cameraTurn(s,a) }
+	if kind == "attack" { if s.CameraIndex >= 0 { ret "",error("camera: return to party view to use hands") }; ret Attack(s,a,b) }
 	if kind == "equip-left" { e = Equip(s,a,0,b); ret "Left hand changed",e }
 	if kind == "equip-right" { e = Equip(s,a,1,b); ret "Right hand changed",e }
 	if kind == "interact" { ret Interact(s) }
@@ -267,6 +270,7 @@ fn Spark(s:State) string,error
 	{
 		x,y = forward(s,distance)
 		if !Walkable(s,x,y) { break }
+		if s.Mines[y*s.Width+x] > 0 { DetonateMine(s,y*s.Width+x); ret "Electric spark detonated a mine",nil }
 		target = EnemyAt(s,x,y)
 		if target < 0 { continue }
 		e = s.Enemies[target]; e.Angry = true
@@ -290,4 +294,19 @@ fn conditionPercent(raw:int64) int64
 	value = raw*100/256
 	if value < 1 { ret 1 }
 	ret value
+}
+
+// EnterPassword accepts a remembered original password independently of owning
+// the message, which can legitimately have been sold after reading it.
+fn EnterPassword(s:State,password:string) string,error
+{
+	cell = FrontCell(s)
+	if !canAct(s) or cell < 0 or (s.Objects[cell]&127) != 0x13 { ret "",error("computer: face the probe computer") }
+	if s.Sabotaged { ret "",error("computer: offline after sabotage") }
+	if strings.ToUpper(strings.Trim(password)) != "CHAESELUME" { ret "",error("computer: password rejected") }
+	if s.Probe { ret "Probe already recovered",nil }
+	i = new Item; i.Kind = "probe"; i.Condition = 100; i.Quantity = 1
+	_,e = addInventory(s.Droids[s.Leader],i); if e != nil { ret "",e }
+	s.Probe = true; append(s.SoundEvents,"computer")
+	ret "Password accepted; planet probe recovered",nil
 }

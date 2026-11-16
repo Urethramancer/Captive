@@ -3,7 +3,7 @@
 
 fn encodeItemProperties(item:Item,v:json.JsonValue)
 {
-	setNumber(v,"code",item.Code); setNumber(v,"quality",item.Quality); setNumber(v,"price",item.Price)
+	setNumber(v,"code",item.Code); setNumber(v,"quality",item.Quality); setNumber(v,"price",item.Price); setNumber(v,"weight",item.Weight)
 	v.Set("enabled",json.NewBool(item.Enabled))
 }
 fn decodeItemProperties(v:json.JsonValue,item:Item) Item,error
@@ -14,6 +14,7 @@ fn decodeItemProperties(v:json.JsonValue,item:Item) Item,error
 	enabled = v.Get("enabled")
 	if !enabled.IsBool() { ret item,error("session save: missing equipment activation") }
 	item.Enabled = enabled.Bool()
+	weight,e = number(v.Get("weight"),0,65535); if e != nil { ret item,e }; item.Weight = weight
 	ret item,nil
 }
 

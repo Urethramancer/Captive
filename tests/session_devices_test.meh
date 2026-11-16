@@ -1,0 +1,90 @@
+@inc test
+@inc src/session
+
+fn moduleParty() session.State
+{
+	s,e = session.New(3,3,[1,1,1,1,1,1,1,1,1],1,1,23)
+	if e != nil { eprintln(e.str()); exit(1) }
+	ret s
+}
+fn addModule(s:session.State,droid:int64,kind:string,quality:int64)
+{
+	i = new session.Item; i.Kind = kind; i.Quality = quality; i.Condition = 100; i.Quantity = 1; i.Enabled = true
+	append(s.Droids[droid].Inventory,i)
+}
+
+fn testNavigationEquipmentGates(t:test.Tester)
+{
+	s = moduleParty()
+	_,e = session.LocalMap(s); t.expect(e != nil,"no unrestricted map")
+	_,e = session.Radar(s); t.expect(e != nil,"radar requires purchased module")
+	t.equalStr(session.Navigation(s),"","no free navigation aid")
+	addModule(s,0,"optic",1); s.Details[4] = 0x0100
+	t.equalStr(session.Navigation(s),"Root Finder: West","original root direction mapping")
+	addModule(s,1,"optic",2)
+	cells,e = session.LocalMap(s); t.expect(e == nil,"powered Mapper enabled")
+	t.equal(len(cells),77,"11by7 Mapper footprint")
+	t.equal(cells[38],1,"current visited cell shown")
+	t.equal(cells[37],-1,"unvisited adjacent floor stays hidden")
+	s.Droids[1].Energy = 0
+	_,e = session.LocalMap(s); t.expect(e != nil,"unpowered Mapper unavailable")
+}
+
+fn testDeviceCategoriesAndPower(t:test.Tester)
+{
+	s = moduleParty(); addModule(s,0,"device",1)
+	t.equal(session.Protect(s,10,"melee"),5,"shield reduces encounter hit")
+	t.equal(session.Protect(s,10,"fire"),10,"ordinary shield does not block fire")
+	addModule(s,1,"device",2)
+	t.equal(session.Protect(s,10,"fire"),5,"Fire-shield protects fire")
+	addModule(s,2,"device",7)
+	t.equal(session.Protect(s,10,"explosion"),0,"Deflector protects explosions")
+	addModule(s,3,"device",5); s.Droids[3].Parts[0] = 0; s.Droids[3].Parts[2] = 3
+	for tick = 0; tick < 60; tick += 1 { session.Tick(s) }
+	t.equal(s.Droids[3].Parts[0],10,"Fixer revives head up to10percent")
+	t.equal(s.Droids[3].Parts[2],10,"Fixer repairs disabled limb up to10percent")
+	t.expect(s.Droids[3].Energy < 100,"module costs consume electrical energy")
+	loaded,e = session.Decode(session.Encode(s)); t.expect(e == nil,"device state saves")
+	if e != nil { ret }
+	for tick = 0; tick < 900; tick += 1 { session.Tick(s); session.Tick(loaded); session.DrainSounds(s); session.DrainSounds(loaded) }
+	t.equalStr(session.Encode(s),session.Encode(loaded),"module power/condition continuation deterministic")
+}
+
+fn testRicochetMineAndRemoteCamera(t:test.Tester)
+{
+	s = moduleParty()
+	i = new session.Item; i.Kind = "ball"; i.Condition = 100; i.Quantity = 1
+	append(s.Droids[0].Inventory,i)
+	_,e = session.Use(s,0,0); t.expect(e == nil,"ball enters world simulation")
+	for tick = 0; tick < 12; tick += 1 { session.Tick(s) }
+	t.equal(s.Balls[0].Direction,2,"ball ricochets from boundary")
+	loaded,e = session.Decode(session.Encode(s)); t.expect(e == nil,"active ball saves")
+	if e != nil { ret }
+	for tick = 0; tick < 200; tick += 1 { session.Tick(s); session.Tick(loaded); session.DrainSounds(s); session.DrainSounds(loaded) }
+	t.equalStr(session.Encode(s),session.Encode(loaded),"ricochet and final drop continue exactly")
+	s = moduleParty(); i.Kind = "mine"; append(s.Droids[0].Inventory,i)
+	_,e = session.Use(s,0,0); t.expect(e == nil,"mine placed")
+	t.equal(s.Mines[4],1,"mine owner recorded")
+	session.Move(s,0); for tick = 0; tick < 4; tick += 1 { session.Tick(s) }; session.Move(s,2)
+	t.equal(s.Mines[4],0,"stepping back detonates mine")
+	s = moduleParty(); i.Kind = "camera"; append(s.Droids[0].Inventory,i)
+	_,e = session.Use(s,0,0); t.expect(e == nil,"camera deploys")
+	x,y,_,remote = session.CameraView(s)
+	t.expect(remote,"camera view selected"); t.equal(x,1,"camera front x"); t.equal(y,0,"camera deployed in front of party")
+	_,e = session.Action(s,"camera-view",0,0); t.expect(e == nil,"return to party view")
+	x,y,_,remote = session.CameraView(s)
+	t.expect(!remote,"party viewpoint restored"); t.equal(y,1,"party did not move with camera")
+}
+
+fn testInitialNamesFollowOriginalInputRules(t:test.Tester)
+{
+	s = moduleParty()
+	e = session.InitialiseParty(s,["Tinker","Tailor","Soldier","Spy"]); t.expect(e == nil,"valid original ASCII names")
+	before = session.Encode(s)
+	for invalid = ["","ABCDEFGHIJKLMNOPQRST","Tink er","Tinker!","Ørb"]
+	{
+		e = session.InitialiseParty(s,[invalid,"Tailor","Soldier","Spy"])
+		t.expect(e != nil,"invalid original name rejected")
+		t.equalStr(session.Encode(s),before,"invalid name changes no party member")
+	}
+}

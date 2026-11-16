@@ -13,6 +13,7 @@ struct Item
 	Quality:int64
 	Price:int64
 	Enabled:bool
+	Weight:int64
 }
 
 class Droid
@@ -25,6 +26,7 @@ class Droid
 	Inventory:[]Item
 	Hands:[]int64
 	Cooldowns:[]int64
+	PowerRemainder:int64
 }
 
 class State
@@ -53,6 +55,12 @@ class State
 	FixtureExtra:[]int64
 	TrapWall:[]int64
 	Offers:[]Offer
+	Visited:[]int64
+	MoveTimer:int64
+	Balls:[]BouncingBall
+	Mines:[]int64
+	Cameras:[]RemoteCamera
+	CameraIndex:int64
 	Width:int64
 	Height:int64
 	Probe:bool
@@ -84,6 +92,9 @@ fn New(width:int64, height:int64, tiles:[]int64, x:int64, y:int64, seed:int64) S
 	s.Terrain = new([]int64); s.Objects = new([]int64); s.Details = new([]int64)
 	s.Tiles = new([]int64)
 	for tile = tiles { append(s.Tiles, tile); append(s.Terrain,tile); append(s.Objects,0); append(s.Details,0) }
+	s.Visited = new([]int64); for tile = tiles { append(s.Visited,0) }; s.Visited[y*width+x] = 1
+	s.Cameras = new([]RemoteCamera); s.CameraIndex = -1
+	s.Balls = new([]BouncingBall); s.Mines = new([]int64); for at = 0; at < len(tiles); at += 1 { append(s.Mines,0) }
 	s.Offers = new([]Offer); s.Enemies = new([]Enemy); s.Loot = new([]Loot); s.DoorOpen = new([]int64); s.SoundEvents = new([]string)
 	s.FixtureTypes = new([]int64); s.FixtureExtra = new([]int64); s.TrapWall = new([]int64)
 	for at = 0; at < len(tiles); at += 1 { append(s.DoorOpen,0); append(s.FixtureTypes,-1); append(s.FixtureExtra,0); append(s.TrapWall,-1) }
@@ -143,6 +154,7 @@ fn Turn(s:State, direction:int64) error
 fn Move(s:State, relative:int64) error
 {
 	if s.Paused or s.Escaped { ret error("session: movement unavailable") }
+	if s.MoveTimer > 0 { ret error("session: movement recharging") }
 	if relative < 0 or relative > 3 { ret error("session: invalid movement") }
 	for d = s.Droids
 	{
@@ -155,7 +167,8 @@ fn Move(s:State, relative:int64) error
 	x = s.X + dx[direction]; y = s.Y + dy[direction]
 	if !Walkable(s,x,y) or EnemyAt(s,x,y) >= 0
 	{ ret error("session: passage blocked") }
-	s.X = x; s.Y = y
+	s.X = x; s.Y = y; s.Visited[y*s.Width+x] = 1; s.MoveTimer = movementDelay(s)
+	if !Ceiling(s) { DetonateMine(s,y*s.Width+x) }
 	s.EnergySteps = (s.EnergySteps+1)%10
 	if s.EnergySteps == 0 { for d = s.Droids { if Alive(d) { d.Energy -= 1 } } }
 	ret nil
@@ -166,6 +179,8 @@ fn Tick(s:State)
 {
 	if s.Paused or s.Escaped { ret }
 	s.Ticks += 1
+	if s.MoveTimer > 0 { s.MoveTimer -= 1 }
+	for camera = s.Cameras { if camera.MoveTimer > 0 { camera.MoveTimer -= 1 } }
 	if s.CursorCharge > 0 { s.CursorCharge -= 1 }
 	for d = s.Droids
 	{
@@ -173,7 +188,7 @@ fn Tick(s:State)
 		{ if d.Cooldowns[hand] > 0 { d.Cooldowns[hand] -= 1 } }
 	}
 	if s.Sabotaged and s.SabotageTicks > 0 { s.SabotageTicks -= 1 }
-	advanceWorld(s)
+	advanceWorld(s); advanceEquipment(s); advanceBalls(s); if s.Ticks%60 == 0 { pruneWorld(s) }
 }
 
 // Equip assigns an inventory item to one hand and prevents duplicate assignment.

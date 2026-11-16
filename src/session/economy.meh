@@ -31,7 +31,7 @@ fn Sell(s:State,droid:int64,item:int64) string,error
 	if i.Quantity == 0 or (i.Kind != "clue" and i.Kind != "weapon" and i.Kind != "device" and i.Kind != "optic" and i.Kind != "ball" and i.Kind != "camera")
 	{ ret "",error("shop: item cannot be sold") }
 	price:int64 = 200
-	if i.Kind == "clue" { if i.Charge == 2 { price = 500 } }
+	if i.Kind == "clue" { price = 200 }
 	else
 	{
 		price = i.Price*i.Condition/200

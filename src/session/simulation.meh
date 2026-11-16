@@ -5,7 +5,7 @@
 fn advanceWorld(s:State)
 {
 	for at = 0; at < len(s.DoorOpen); at += 1
-	{ if s.DoorOpen[at] > 0 { s.DoorOpen[at] -= 1 } }
+	{ if s.DoorOpen[at] > 0 { s.DoorOpen[at] -= 1; if s.DoorOpen[at] == 0 { crushDoor(s,at) } } }
 	for e = s.Enemies
 	{
 		living = false
@@ -23,7 +23,7 @@ fn advanceWorld(s:State)
 			if Alive(d)
 			{
 				part = NextRandom(s,6)
-				damage = 1+NextRandom(s,3)
+				damage = Protect(s,1+NextRandom(s,3),"melee")
 				d.Parts[part] -= damage
 				if d.Parts[part] < 0 { d.Parts[part] = 0 }
 				append(s.SoundEvents,"hurt")
@@ -38,7 +38,7 @@ fn advanceWorld(s:State)
 		{
 			for loot = s.Loot
 			{ if loot.Kind == "clue" and loot.Value == 2 and loot.X == e.X and loot.Y == e.Y { loot.X = x; loot.Y = y } }
-			e.X = x; e.Y = y
+			e.X = x; e.Y = y; DetonateMine(s,y*s.Width+x)
 		}
 	}
 }

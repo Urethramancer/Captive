@@ -1,0 +1,134 @@
+@mod session
+
+// HasEquipment checks an activated, powered module owned by an operational chest.
+fn HasEquipment(s:State,kind:string,quality:int64) bool
+{ ret equipmentCount(s,kind,quality) > 0 }
+fn equipmentCount(s:State,kind:string,quality:int64) int64
+{
+	count:int64 = 0
+	for d = s.Droids
+	{
+		if d.Energy <= 0 or d.Parts[1] == 0 { continue }
+		for i = d.Inventory
+		{ if i.Kind == kind and i.Quality == quality and i.Enabled and i.Quantity > 0 and i.Condition > 0 { count += 1 } }
+	}
+	ret count
+}
+
+// Ceiling reports the original Anti-Grav state for presentation and hazards.
+fn Ceiling(s:State) bool { ret HasEquipment(s,"device",0) }
+
+// Protect applies the actual device categories; numerical shielding is tuning.
+fn Protect(s:State,damage:int64,kind:string) int64
+{
+	if damage <= 0 { ret 0 }
+	if kind == "fire" { ret damage/(1+equipmentCount(s,"device",2)) }
+	if HasEquipment(s,"device",7) { ret 0 }
+	if kind == "melee" or kind == "projectile" { ret damage/(1+equipmentCount(s,"device",1)) }
+	ret damage
+}
+
+// Navigation is equipment-gated and uses the recovered root directions.
+fn Navigation(s:State) string
+{
+	if HasEquipment(s,"optic",1)
+	{
+		root = (s.Details[s.Y*s.Width+s.X]>>8)&3
+		directions:[]string = ["North","West","South","East"]
+		ret format("Root Finder: {}",directions[root])
+	}
+	if HasEquipment(s,"optic",4)
+	{
+		directions:[]string = ["North","East","South","West"]
+		ret format("Compass: {}",directions[s.Facing])
+	}
+	ret ""
+}
+
+// LocalMap returns the Mapper's11x7 visited-area window: -1 unseen,0wall,1floor.
+// It never exposes an unrestricted map, even when the complete base is loaded.
+fn LocalMap(s:State) []int64,error
+{
+	if !HasEquipment(s,"optic",2) { ret nil,error("mapper: activate a Mapper optic") }
+	result = new([]int64)
+	for y = s.Y-3; y <= s.Y+3; y += 1
+	{
+		for x = s.X-5; x <= s.X+5; x += 1
+		{
+			value:int64 = -1
+			if x >= 0 and x < s.Width and y >= 0 and y < s.Height
+			{
+				at = y*s.Width+x
+				if s.Visited[at] > 0 { value = s.Tiles[at] }
+			}
+			append(result,value)
+		}
+	}
+	ret result,nil
+}
+
+// Radar returns9x9 cells centred on the party:0empty,1living encounter.
+// It reveals no wall layout and is available only with the Radar optic.
+fn Radar(s:State) []int64,error
+{
+	if !HasEquipment(s,"optic",3) { ret nil,error("radar: activate a Radar optic") }
+	result = new([]int64)
+	for y = s.Y-4; y <= s.Y+4; y += 1
+	{ for x = s.X-4; x <= s.X+4; x += 1
+	{ value:int64 = 0; if EnemyAt(s,x,y) >= 0 { value = 1 }; append(result,value) } }
+	ret result,nil
+}
+
+fn movementDelay(s:State) int64
+{
+	load:int64 = 0
+	for d = s.Droids
+	{
+		weight:int64 = 0
+		for i = d.Inventory { if i.Quantity > 0 { weight += i.Weight*i.Quantity } }
+		if weight > load { load = weight }
+	}
+	penalty:int64 = 0
+	if load > 1000 { penalty = (load-1000)/100 }
+	penalty = penalty/(1+equipmentCount(s,"device",3))
+	if penalty > 116 { penalty = 116 }
+	ret 4+penalty
+}
+
+// advanceEquipment retains relative original module electrical costs. Converting
+// original electrical units to the100-point energy display is provisional.
+fn advanceEquipment(s:State)
+{
+	if s.Ticks%60 != 0 { ret }
+	deviceCosts:[]int64 = [1140,200,400,150,45888,1200,1,800]
+	opticCosts:[]int64 = [20,90,40,180,10,10,20,40]
+	for droidIndex = 0; droidIndex < 4; droidIndex += 1
+	{
+		d = s.Droids[droidIndex]
+		if d.Energy <= 0 or d.Parts[1] == 0 { continue }
+		if s.CameraIndex >= 0 and droidIndex == s.Leader { d.PowerRemainder += 1500 }
+		for index = 0; index < len(d.Inventory); index += 1
+		{
+			i = d.Inventory[index]
+			if !i.Enabled or i.Quantity == 0 or i.Condition == 0 { continue }
+			if i.Kind == "device"
+			{
+				d.PowerRemainder += deviceCosts[i.Quality]
+				if i.Quality == 5
+				{ for part = 0; part < 6; part += 1 { if part != 1 and d.Parts[part] < 10 { d.Parts[part] = 10 } } }
+				if i.Quality == 6 { d.PowerRemainder -= 1500 }
+			}
+			if i.Kind == "optic" { d.PowerRemainder += opticCosts[i.Quality] }
+			if (i.Kind == "device" or i.Kind == "optic") and s.Ticks%600 == 0
+			{
+				i.Condition -= 1
+				if i.Condition <= 0 { i.Enabled = false; i.Quantity = 0; append(s.SoundEvents,"explosion") }
+				d.Inventory[index] = i
+			}
+		}
+		for d.PowerRemainder >= 1000 { d.Energy -= 1; d.PowerRemainder -= 1000 }
+		for d.PowerRemainder <= -1000 { d.Energy += 1; d.PowerRemainder += 1000 }
+		if d.Energy < 0 { d.Energy = 0 }
+		if d.Energy >= 100 { d.Energy = 100; if d.PowerRemainder < 0 { d.PowerRemainder = 0 } }
+	}
+}

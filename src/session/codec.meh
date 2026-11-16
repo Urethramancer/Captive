@@ -19,7 +19,7 @@ fn Encode(s:State) string
 	setNumber(o,"x",s.X); setNumber(o,"y",s.Y); setNumber(o,"facing",s.Facing)
 	setNumber(o,"ticks",s.Ticks); setNumber(o,"rng",s.Rng); setNumber(o,"leader",s.Leader)
 	setNumber(o,"width",s.Width); setNumber(o,"height",s.Height); setNumber(o,"credits",s.Credits)
-	setNumber(o,"sabotageTicks",s.SabotageTicks); setNumber(o,"cursorCharge",s.CursorCharge); setNumber(o,"energySteps",s.EnergySteps)
+	setNumber(o,"sabotageTicks",s.SabotageTicks); setNumber(o,"cursorCharge",s.CursorCharge); setNumber(o,"energySteps",s.EnergySteps); setNumber(o,"moveTimer",s.MoveTimer); o.Set("visited",integers(s.Visited))
 	o.Set("paused",json.NewBool(s.Paused)); o.Set("probe",json.NewBool(s.Probe))
 	o.Set("sabotaged",json.NewBool(s.Sabotaged)); o.Set("escaped",json.NewBool(s.Escaped))
 	o.Set("tiles",integers(s.Tiles)); o.Set("formation",integers(s.Formation))
@@ -27,7 +27,7 @@ fn Encode(s:State) string
 	for d = s.Droids
 	{
 		v = json.NewObject()
-		v.Set("name",json.NewString(d.Name)); setNumber(v,"energy",d.Energy)
+		v.Set("name",json.NewString(d.Name)); setNumber(v,"energy",d.Energy); setNumber(v,"powerRemainder",d.PowerRemainder)
 		v.Set("parts",integers(d.Parts)); v.Set("skills",integers(d.Skills))
 		v.Set("hands",integers(d.Hands)); v.Set("cooldowns",integers(d.Cooldowns))
 		items = json.NewArray()
@@ -41,7 +41,7 @@ fn Encode(s:State) string
 		v.Set("inventory",items); droids.Append(v)
 	}
 	o.Set("droids",droids)
-	encodeWorld(s,o); encodeCatalogue(s,o)
+	encodeWorld(s,o); encodeCatalogue(s,o); encodeProjectiles(s,o); encodeCameras(s,o)
 	ret json.Marshal(o)
 }
 
@@ -101,6 +101,8 @@ fn Decode(text:string) State,error
 	s.SabotageTicks = valueSabotageTicks
 	cursor,e = number(o.Get("cursorCharge"),0,4200); if e != nil { ret nil,e }; s.CursorCharge = cursor
 	steps,e = number(o.Get("energySteps"),0,9); if e != nil { ret nil,e }; s.EnergySteps = steps
+	moveTimer,e = number(o.Get("moveTimer"),0,120); if e != nil { ret nil,e }; s.MoveTimer = moveTimer
+	visited,e = numbers(o.Get("visited"),s.Width*s.Height,0,1); if e != nil { ret nil,e }; s.Visited = visited
 	for key = ["paused","probe","sabotaged","escaped"]
 	{ if !o.Get(key).IsBool() { ret nil,error("session save: missing boolean") } }
 	s.Paused = o.Get("paused").Bool(); s.Probe = o.Get("probe").Bool()
@@ -127,6 +129,7 @@ fn Decode(text:string) State,error
 		d.Skills = valueSkills
 		valueEnergy,e = number(v.Get("energy"),0,100); if e != nil { ret nil,e }
 		d.Energy = valueEnergy
+		power,e = number(v.Get("powerRemainder"),-999,999); if e != nil { ret nil,e }; d.PowerRemainder = power
 		valueCooldowns,e = numbers(v.Get("cooldowns"),2,0,2147483647); if e != nil { ret nil,e }
 		d.Cooldowns = valueCooldowns
 		items = v.Get("inventory")
@@ -157,6 +160,8 @@ fn Decode(text:string) State,error
 	}
 	e = decodeWorld(s,o); if e != nil { ret nil,e }
 	e = decodeCatalogue(s,o); if e != nil { ret nil,e }
+	e = decodeProjectiles(s,o); if e != nil { ret nil,e }
+	e = decodeCameras(s,o); if e != nil { ret nil,e }
 	ret s,nil
 }
 

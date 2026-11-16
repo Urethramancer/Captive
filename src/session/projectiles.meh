@@ -1,0 +1,109 @@
+@mod session
+
+class BouncingBall
+{
+	X:int64
+	Y:int64
+	Direction:int64
+	Life:int64
+	Timer:int64
+	Owner:int64
+}
+
+fn consumeItem(d:Droid,index:int64)
+{
+	i = d.Inventory[index]; i.Quantity -= 1; i.Enabled = false; d.Inventory[index] = i
+	if i.Quantity <= 0
+	{ for hand = 0; hand < 2; hand += 1 { if d.Hands[hand] == index { d.Hands[hand] = -1 } } }
+}
+
+fn dropGold(s:State,e:Enemy)
+{
+	// Original encounters drop gold. The quantity formula remains provisional.
+	loot = new Loot; loot.Kind = "gold"; loot.X = e.X; loot.Y = e.Y
+	loot.Value = len(e.Health)*10+NextRandom(s,100)
+	append(s.Loot,loot)
+}
+
+fn damageGroup(s:State,e:Enemy,damage:int64,owner:int64)
+{
+	for member = 0; member < len(e.Health); member += 1
+	{
+		if e.Health[member] <= 0 { continue }
+		e.Health[member] -= damage
+		if e.Health[member] < 0 { e.Health[member] = 0 }
+		if e.Health[member] == 0 and owner >= 0 and owner < 4
+		{ d = s.Droids[owner]; if d.Skills[0] < 100 { d.Skills[0] += 1 } }
+		if EnemyAt(s,e.X,e.Y) < 0 { dropGold(s,e) }
+		ret
+	}
+}
+
+// DetonateMine resolves a placed mine when stepped on or struck by an object.
+fn DetonateMine(s:State,at:int64)
+{
+	if at < 0 or at >= len(s.Mines) or s.Mines[at] == 0 { ret }
+	owner = s.Mines[at]-1; s.Mines[at] = 0
+	x = at%s.Width; y = at/s.Width
+	target = EnemyAt(s,x,y)
+	if target >= 0 { damageGroup(s,s.Enemies[target],150,owner) }
+	if x == s.X and y == s.Y
+	{
+		for d = s.Droids
+		{
+			part = NextRandom(s,6); d.Parts[part] -= Protect(s,20,"explosion")
+			if d.Parts[part] < 0 { d.Parts[part] = 0 }
+		}
+	}
+	append(s.SoundEvents,"explosion")
+}
+
+fn advanceBalls(s:State)
+{
+	dx:[]int64 = [0,1,0,-1]; dy:[]int64 = [-1,0,1,0]
+	for ball = s.Balls
+	{
+		if ball.Life <= 0 { continue }
+		ball.Life -= 1
+		if ball.Life == 0
+		{
+			loot = new Loot; loot.X = ball.X; loot.Y = ball.Y; loot.Kind = "ball"
+			append(s.Loot,loot); continue
+		}
+		ball.Timer -= 1
+		if ball.Timer > 0 { continue }; ball.Timer = 6
+		x = ball.X+dx[ball.Direction]; y = ball.Y+dy[ball.Direction]
+		if !Walkable(s,x,y) { ball.Direction = (ball.Direction+2)%4; append(s.SoundEvents,"bounce"); continue }
+		ball.X = x; ball.Y = y
+		DetonateMine(s,y*s.Width+x)
+		target = EnemyAt(s,x,y)
+		if target >= 0
+		{ e = s.Enemies[target]; e.Angry = true; damageGroup(s,e,50,ball.Owner); append(s.SoundEvents,"hit") }
+		if x == s.X and y == s.Y
+		{
+			d = s.Droids[s.Leader]; part = NextRandom(s,6)
+			d.Parts[part] -= Protect(s,10,"projectile")
+			if d.Parts[part] < 0 { d.Parts[part] = 0 }
+			append(s.SoundEvents,"hurt")
+		}
+	}
+}
+
+fn pruneWorld(s:State)
+{
+	balls = new([]BouncingBall)
+	for ball = s.Balls { if ball.Life > 0 { append(balls,ball) } }
+	s.Balls = balls
+	loot = new([]Loot)
+	for item = s.Loot { if !item.Collected { append(loot,item) } }
+	s.Loot = loot
+}
+
+fn crushDoor(s:State,at:int64)
+{
+	x = at%s.Width; y = at/s.Width
+	target = EnemyAt(s,x,y)
+	if target >= 0 { damageGroup(s,s.Enemies[target],400,s.Leader) }
+	for camera = s.Cameras
+	{ if camera.Active and camera.X == x and camera.Y == y { camera.Active = false; s.CameraIndex = -1; append(s.SoundEvents,"explosion") } }
+}

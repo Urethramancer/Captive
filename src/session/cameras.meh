@@ -1,0 +1,86 @@
+@mod session
+
+class RemoteCamera
+{
+	X:int64
+	Y:int64
+	Facing:int64
+	MoveTimer:int64
+	Active:bool
+}
+
+// CameraView supplies a presentation viewpoint without changing party position.
+fn CameraView(s:State) int64,int64,int64,bool
+{
+	if s.CameraIndex >= 0 and s.CameraIndex < len(s.Cameras)
+	{
+		camera = s.Cameras[s.CameraIndex]
+		if camera.Active { ret camera.X,camera.Y,camera.Facing,true }
+	}
+	ret s.X,s.Y,s.Facing,false
+}
+fn cycleCamera(s:State) string,error
+{
+	if !canAct(s) { ret "",error("camera: party unavailable") }
+	for index = s.CameraIndex+1; index < len(s.Cameras); index += 1
+	{ if s.Cameras[index].Active { s.CameraIndex = index; ret "Remote camera view",nil } }
+	s.CameraIndex = -1; ret "Party view",nil
+}
+fn cameraMove(s:State,relative:int64) string,error
+{
+	if !canAct(s) or s.CameraIndex < 0 or relative != 0 { ret "",error("camera: invalid movement") }
+	c = s.Cameras[s.CameraIndex]
+	if !c.Active or c.MoveTimer > 0 { ret "",error("camera: movement unavailable") }
+	dx:[]int64 = [0,1,0,-1]; dy:[]int64 = [-1,0,1,0]; direction = (c.Facing+relative)%4
+	x = c.X+dx[direction]; y = c.Y+dy[direction]
+	if !Walkable(s,x,y) or EnemyAt(s,x,y) >= 0 { ret "",error("camera: passage blocked") }
+	c.X = x; c.Y = y; c.MoveTimer = 4
+	ret "Camera moved",nil
+}
+fn cameraTurn(s:State,direction:int64) string,error
+{
+	if !canAct(s) or s.CameraIndex < 0 or (direction != -1 and direction != 1) { ret "",error("camera: invalid turn") }
+	c = s.Cameras[s.CameraIndex]
+	if !c.Active { ret "",error("camera: unavailable") }
+	c.Facing = (c.Facing+direction+4)%4
+	ret "Camera turned",nil
+}
+fn detonateCamera(s:State) string,error
+{
+	if !canAct(s) or s.CameraIndex < 0 { ret "",error("camera: select a camera first") }
+	c = s.Cameras[s.CameraIndex]
+	if !c.Active { ret "",error("camera: unavailable") }
+	if s.Droids[s.Leader].Skills[0] < 15 { ret "",error("camera: leader dexterity15 required to detonate") }
+	c.Active = false; s.CameraIndex = -1
+	for y = c.Y-1; y <= c.Y+1; y += 1
+	{
+		for x = c.X-1; x <= c.X+1; x += 1
+		{
+			if x < 0 or x >= s.Width or y < 0 or y >= s.Height { continue }
+			DetonateMine(s,y*s.Width+x)
+			target = EnemyAt(s,x,y)
+			if target >= 0 { damageGroup(s,s.Enemies[target],100,s.Leader) }
+			if x == s.X and y == s.Y
+			{
+				for d = s.Droids
+				{ part = NextRandom(s,6); d.Parts[part] -= Protect(s,20,"explosion"); if d.Parts[part] < 0 { d.Parts[part] = 0 } }
+			}
+		}
+	}
+	append(s.SoundEvents,"explosion")
+	ret "Camera detonated",nil
+}
+fn recoverCamera(s:State) bool
+{
+	for camera = s.Cameras
+	{
+		if camera.Active and camera.X == s.X and camera.Y == s.Y
+		{
+			i = new Item; i.Kind = "camera"; i.Code = 30; i.Price = 1200; i.Weight = 293; i.Condition = 100; i.Quantity = 1
+			_,e = addInventory(s.Droids[s.Leader],i)
+			if e != nil { ret false }
+			camera.Active = false; s.CameraIndex = -1; ret true
+		}
+	}
+	ret false
+}
