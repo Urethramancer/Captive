@@ -82,6 +82,12 @@ sabotage, escape and a saved continuation before returning success. Midway and
 final PNG captures are written beside the replay save. Closing early returns
 failure. Replay advances only the transcript's ticks; normal play uses wall time.
 
+The two-base acceptance route completes 672 gameplay/travel actions and 3,659
+fixed ticks, crosses the floor link in both directions, and verifies four
+combat save/load pairs. It has completed in both the headless controller and
+the packaged app. The GUI regression also verifies that restoring Base 2's
+entry checkpoint retains the carried party and does not load Base 1.
+
 Packaging embeds the current architecture's static Meh executable, local base,
 fixture and trap exports, generated art, comparison crops and verified original
 sound cues. It creates an internal ad-hoc-signed app. The requested first
