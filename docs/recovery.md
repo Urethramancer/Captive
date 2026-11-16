@@ -126,3 +126,9 @@ go test tools/main-export/main.go tools/main-export/main_test.go
 ```
 
 It checks the Amiga hunk descriptor, declared code bounds and exact supplied-main SHA-256 (`8545561236cf6e0f773cd1ae886be13cc9bedf51c53595c28c3b2e259c4dabbc`) before using revision-specific offsets. The ignored TSV contains 180 offers: raw item identifier, kind, category, quality, price, original item data and flags, together with the numbered shop's position. Shop two offers Knuckle-Duster qualities 0,1,2,3,5,7 and Battle-Glove qualities 0,2,6,7. The respective Basic prices are 49 and 99. Exporter tests cover descriptor bounds, unsupported checksums, stock gates, quality-mask vectors and invalid shop registries.
+
+## Sabotage sequence
+
+Main code `9fbe`–`9ff8` consumes one explosive, stores the selected generator coordinate and starts state one with a counter of 100 simulation updates. Routine `7faa` advances to state two when this reaches zero. The shutdown scan at `7ffa`–`8036` opens blue/laser doors and raiser walls, while the interaction routines reject powered facilities after shutdown.
+
+The subsequent destructive wave uses root-path directions. Routine `8088` advances the front every 14 updates, follows one root-path step through `8136`, and paints the front cell plus its four neighbours as fire. The original root direction order is **north, west, south, east** (values 0,1,2,3), independently established by the displacement tables at `815a` and `8162`. This direction order differs from a common clockwise heading enum. Preserve it when translating raw detail words. The original scheduler's update frequency has not yet been established; these counts must not be labelled exact seconds.
