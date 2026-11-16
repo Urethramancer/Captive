@@ -1,0 +1,19 @@
+@inc os
+@inc src/audio
+@inc src/assets
+fn main()
+{
+	if len(argv) != 3 { println("Usage: audio-export FEDERATION FED_SOUNDS OUTPUT_DIRECTORY"); exit(2) }
+	federation, e = os.ReadfileBytes(argv[0]); if e != nil { println("{}", e); exit(1) }
+	bank, e = os.ReadfileBytes(argv[1]); if e != nil { println("{}", e); exit(1) }
+	effects, e = audio.Effects(federation, bank); if e != nil { println("{}", e); exit(1) }
+	e = os.Mkdirall(argv[2], 0o755); if e != nil { println("{}", e); exit(1) }
+	for effect = effects
+	{
+		sound, e = audio.Render(bank, effect); if e != nil { println("{}", e); exit(1) }
+		wav, e = assets.WAV(sound); if e != nil { println("{}", e); exit(1) }
+		e = os.Writefile(os.PathJoin(argv[2], "effect-" + effect.ID.str() + ".wav"), str(wav))
+		if e != nil { println("{}", e); exit(1) }
+	}
+	println("Exported {} original effects", len(effects))
+}

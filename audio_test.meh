@@ -1,0 +1,37 @@
+@inc test
+@inc os
+@inc src/audio
+fn testAudioDescriptors(t:test.Tester)
+{
+	federation, e = os.ReadfileBytes("build/extracted/federation")
+	if e != nil { t.fail("read extracted Federation"); ret }
+	bank, e = os.ReadfileBytes("build/extracted/Fed_Sounds")
+	if e != nil { t.fail("read extracted sound bank"); ret }
+	effects, e = audio.Effects(federation, bank)
+	t.expect(e == nil, "recover Amiga sound descriptors")
+	if e != nil { ret }
+	t.equal(len(effects), 52, "original table has 52 effects")
+	t.equal(effects[0].Offset, 104, "automatic weapon offset")
+	t.equal(effects[0].Bytes, 2708, "word-sized Amiga automatic sample")
+	t.equal(effects[0].Period, 514, "Amiga period is recovered without Atari substitution")
+	for effect = effects
+	{
+		sound, failure = audio.Render(bank, effect)
+		t.expect(failure == nil, "render bounded original effect")
+		if failure == nil
+		{
+			t.equal(sound.Rate, 22050, "resampled output is accepted by native bridge")
+			t.equal(len(sound.Samples), effect.Bytes * effect.Period * 22050 / 3546895, "resampling preserves duration")
+			t.equal(int(sound.Samples[0]), int(bank[effect.Offset]), "signed first sample preserved")
+		}
+	}
+	federation[54186] = 0
+	_, corrupt = audio.Effects(federation, bank)
+	t.expect(corrupt != nil, "reject unsupported executable marker")
+	invalid = new audio.Effect
+	invalid.Offset = len(bank)
+	invalid.Bytes = 1
+	invalid.Period = 514
+	_, outside = audio.Render(bank, invalid)
+	t.expect(outside != nil, "reject sample beyond bank")
+}

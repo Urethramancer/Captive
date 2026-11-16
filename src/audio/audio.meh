@@ -1,0 +1,80 @@
+@mod audio
+@inc src/assets
+
+// Effect describes one original Amiga runtime sound entry (IDs 1..52).
+class Effect
+{
+	ID:int64
+	Offset:int64
+	Bytes:int64
+	Period:int64
+	Control:int64
+	fn init() {}
+}
+fn word(data:[]byte, at:int64) int64 { ret (int(data[at]) << 8) | int(data[at+1]) }
+// Effects recovers the DMA descriptors from the supplied Amiga Federation hunk.
+// No descriptor values or Atari ordering are substituted for these binary data.
+fn Effects(federation:[]byte, bank:[]byte) []Effect, error
+{
+	if len(federation) < 54192 or len(bank) < 104 { ret nil, error("audio: truncated original resources") }
+	if str(bank, 0, 4) != "FORM" or str(bank, 8, 4) != "8SVX" { ret nil, error("audio: expected original 8SVX bank") }
+	// This release-specific marker avoids silently indexing another executable.
+	if word(federation, 54186) != 16890 or word(federation, 54188) != 64984
+	{ ret nil, error("audio: unsupported Federation sound-table reference") }
+	if word(federation, 54190) != 59200 { ret nil, error("audio: invalid sound-table indexing instruction") }
+	output = new([]Effect)
+	for id:int64 = 1; id <= 52; id += 1
+	{
+		at = 53636 + id*8
+		effect = new Effect
+		effect.ID = id
+		effect.Offset = word(federation, at)
+		effect.Bytes = word(federation, at+2)*2
+		effect.Period = word(federation, at+4)
+		if effect.Offset < 104 or effect.Bytes < 1 or effect.Offset > len(bank)-effect.Bytes or effect.Period < 100 or effect.Period > 2000
+		{ ret nil, error("audio: invalid sound descriptor") }
+
+		effect.Control = word(federation, at+6)
+		if effect.Offset < 104 or effect.Bytes < 1 or effect.Offset > len(bank)-effect.Bytes or effect.Period < 100 or effect.Period > 2000
+		{ ret nil, error("audio: descriptor outside sample bank or period bounds") }
+		append(output, effect)
+	}
+	if output[0].Offset != 104 or output[0].Bytes != 2708 or output[0].Period != 514
+	{ ret nil, error("audio: unsupported original sound table") }
+	ret output, nil
+}
+fn signedSample(value:byte) int64
+{
+	v = int(value)
+	if v > 127 { v -= 256 }
+	ret v
+}
+// Render reconstructs an effect at its DMA period into 22050 Hz signed PCM.
+// PAL Paula clock is a presentation assumption; exact machine timing varies.
+fn Render(bank:[]byte, effect:Effect) assets.Sound, error
+{
+	if effect == nil { ret nil, error("audio: missing effect") }
+	if effect.Offset < 0 or effect.Bytes < 1 or effect.Offset > len(bank)-effect.Bytes or effect.Period < 100 or effect.Period > 2000
+	{ ret nil, error("audio: invalid effect bounds") }
+	clock:int64 = 3546895
+	rate:int64 = 22050
+	frames = effect.Bytes * effect.Period * rate / clock
+	if frames < 1 or frames > 2205000 { ret nil, error("audio: excessive effect duration") }
+	result = new assets.Sound
+	result.Rate = rate
+	result.Samples = bytes(frames)
+	for frame:int64 = 0; frame < frames; frame += 1
+	{
+		position = frame * clock
+		denominator = effect.Period * rate
+		index = position / denominator
+		fraction = position % denominator
+		next = index+1
+		if next >= effect.Bytes { next = effect.Bytes-1 }
+		a = signedSample(bank[effect.Offset+index])
+		b = signedSample(bank[effect.Offset+next])
+		value = a + (b-a)*fraction/denominator
+		result.Samples[frame] = byte(value & 255)
+	}
+	ret result, nil
+}
