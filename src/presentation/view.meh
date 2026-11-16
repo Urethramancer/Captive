@@ -342,7 +342,6 @@ class View
 	fn Draw(s:session.State)
 	{
 		w=self.Window; w.Begin(uint32(0x151d1bff))
-		self.MaterialOffset=s.BaseNumber
 		w.Rect(8.0,8.0,1264.0,764.0,uint32(0x4a4b3dff))
 		w.Rect(16.0,16.0,1248.0,748.0,uint32(0x182220ff))
 		w.Text("CAPTIVE",28.0,27.0,30.0,ink)

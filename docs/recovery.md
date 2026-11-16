@@ -82,7 +82,9 @@ three 16-bit `n = n*1509+41` steps. The four syllable tables produce
 `CHAESELUME` for seed zero and `RUPPESICBERY` for seed one (computer index zero).
 Blade damage, skill thresholds, punch-door strength and static-fire pacing
 remain remaster tuning; these values have not been verified against an Amiga
-playthrough. Travel currently implements a direct Swan transfer and consumes
+playthrough. Wall panels currently toggle their recovered door links directly;
+their exact original control variants and combinations remain unverified.
+Travel currently implements a direct Swan transfer and consumes
 the route probe, without simulating the Holamap or planetary surface.
 
 ## Remaining gameplay verification

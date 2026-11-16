@@ -77,7 +77,8 @@ also use an inline field. Simulation and audio pause while typing.
 After escaping the first base, use the Swan's **Travel to Base 2** action (or
 Enter). The probe reveals the route and is consumed; your party, formation,
 condition, skills, equipment and credits carry over. Travel creates a fresh
-base-entry checkpoint. This is a direct Swan transfer; free Holamap flight and
+entry checkpoint for that base; CHECKPOINT always restores the current base's
+entry. This is a direct Swan transfer; free Holamap flight and
 planetary surface exploration remain future work.
 
 The second base has two floors. Stand on a ladder and press Space to climb.

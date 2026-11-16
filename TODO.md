@@ -6,6 +6,8 @@
   name-derived numerical tuning against original Amiga gameplay.
 - Recover the original Amiga Brains composite and animated palette changes for
   more exact artwork comparison.
+- Recover the precise control variants and combinations of second-base wall
+  panels; the current interaction directly toggles their recovered door links.
 
 ## Deferred campaign
 

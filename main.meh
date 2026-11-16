@@ -31,7 +31,7 @@ class Application
 		if !self.State.Escaped { ret error("Escape with the probe before returning to the Swan.") }
 		next,e=campaign.Load(os.PathJoin(self.BaseDirectory,"base1.tsv"),1); if e!=nil { ret error("Cannot load the second base: "+e.str()) }
 		arrived,e=session.Travel(self.State,next); if e!=nil { ret e }
-		e=persistence.Save(os.PathJoin(self.SaveDirectory,"base-entry.captive"),session.Encode(arrived)); if e!=nil { ret e }
+		e=persistence.Save(os.PathJoin(self.SaveDirectory,"base-1-entry.captive"),session.Encode(arrived)); if e!=nil { ret e }
 		self.State=arrived; self.View.Inventory=-1; self.View.Page=0; self.View.StockPage=0; self.View.SelectedItem=-1
 		self.View.Window.AudioClear(); self.View.Window.AudioPause(false); self.ResetClock=true
 		self.View.Message="Base 2 reached. Turn left into the entry passage; Space climbs ladders."
@@ -122,6 +122,7 @@ class Application
 		if e != nil { self.View.Message="Load failed: "+e.str(); eprintln(self.View.Message); ret }
 		next,err=session.Decode(payload)
 		if err != nil { self.View.Message="Load failed: "+err.str(); eprintln(self.View.Message); ret }
+		if strings.HasSuffix(name,"-entry.captive") and next.BaseNumber!=self.State.BaseNumber { self.View.Message="Checkpoint belongs to another base."; ret }
 		self.State=next; self.View.Inventory=-1; self.View.Page=0; self.View.SelectedItem=-1
 		self.View.Window.AudioClear(); self.View.Window.AudioPause(next.Paused)
 		self.View.Message="Session restored."
@@ -132,7 +133,12 @@ class Application
 		if strings.HasPrefix(action,"rename:") { self.BeginEdit("name",atoi(action[7:])); ret }
 		if action=="save" { self.Save("manual.captive"); ret }
 		if action=="load" { self.Load("manual.captive"); ret }
-		if action=="checkpoint" { self.Load("base-entry.captive"); ret }
+		if action=="checkpoint"
+		{
+			name=format("base-{}-entry.captive",self.State.BaseNumber)
+			if self.State.BaseNumber==0 and !os.Exists(os.PathJoin(self.SaveDirectory,name)) { name="base-entry.captive" }
+			self.Load(name); ret
+		}
 		if action=="pause"
 		{ _,_=session.Action(self.State,"pause",0,0); self.View.Window.AudioPause(self.State.Paused); ret }
 		if action=="" { ret }
@@ -250,7 +256,7 @@ fn run() error
 	if !smoke
 	{
 		if !os.Isdir(savePath) { e=os.Mkdirall(savePath,0o700); if e != nil { ret e } }
-		app.Save("base-entry.captive")
+		app.Save("base-0-entry.captive")
 	}
 	replay=new([]string); replayAt:int64=1; expectedBase:int64=0
 	if replayPath!=""

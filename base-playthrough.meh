@@ -1,6 +1,7 @@
 @inc os
 @inc src/session
 @inc src/persistence
+@inc src/campaign
 
 // This acceptance controller dispatches the same actions as the GUI. It reads
 // recovered cells for routing; it never changes party stats, map or inventory.
@@ -56,6 +57,16 @@ class Runner
 		}
 		ret nil
 	}
+	fn Travel() error
+	{
+		next,e=campaign.Load(".build/recovery/base1.tsv",1); if e!=nil { ret e }
+		arrived,e=session.Travel(self.State,next); if e!=nil { ret e }
+		if self.Twin!=nil
+		{ twin,e=session.Travel(self.Twin,next); if e!=nil { ret e }; self.Twin=twin; if session.Encode(twin)!=session.Encode(arrived) { ret error("playthrough: travel continuation diverged") } }
+		self.State=arrived; self.MidpointSaved=false; self.Transcript+="travel\t0\t0\t0\n"
+		println("Travelled to the second base with the surviving party")
+		ret nil
+	}
 	fn Fight(x:int64,y:int64) error
 	{
 		for rounds=0; rounds<500; rounds+=1
@@ -109,18 +120,26 @@ fn planStep(s:session.State,targetX:int64,targetY:int64) int64,error
 	for head=0;head<len(queue);head+=1
 	{
 		cell=queue[head]; if cell==goal { break }
+		ladder=session.LadderTarget(s,cell)
+		if ladder>=0 and previous[ladder]<0 { previous[ladder]=cell; append(queue,ladder) }
 		for direction=0;direction<4;direction+=1
 		{
 			x=cell%s.Width+dx[direction];y=cell/s.Width+dy[direction]
 			if x<0 or x>=s.Width or y<0 or y>=s.Height { continue }
 			next=y*s.Width+x; object=s.Objects[next]&127
 			if previous[next]>=0 or (s.Tiles[next]==0 and object!=0x21) { continue }
+			if s.BaseNumber>0 and object==0x15 and ((s.Objects[next]>>8)&7)==6 and s.DoorOpen[next]==0 { continue }
 			if object==0x0e
 			{
+				// Push away from the original root path, towards the paired
+				// blockage. Reverse pushes can seal the reactor's escape corridor.
+				if s.BaseNumber>0
+				{ pushes:[]int64=[2,1,0,3]; if direction!=pushes[(s.Details[next]>>8)&3] { continue } }
 				bx=x+dx[direction];by=y+dy[direction]
 				if bx<0 or bx>=s.Width or by<0 or by>=s.Height { continue }
 				behind=by*s.Width+bx
 				if !session.Walkable(s,bx,by) and (s.Objects[behind]&127)!=0x21 { continue }
+				if session.EnemyAt(s,bx,by)>=0 { continue }
 			}
 			previous[next]=cell;append(queue,next)
 		}
@@ -134,6 +153,7 @@ fn planStep(s:session.State,targetX:int64,targetY:int64) int64,error
 	}
 	for direction=0;direction<4;direction+=1
 	{ if start%s.Width+dx[direction]==next%s.Width and start/s.Width+dy[direction]==next/s.Width { ret direction,nil } }
+	if session.LadderTarget(s,start)==next { ret 4,nil }
 	ret -1,error("playthrough: invalid route")
 }
 fn recharge(r:Runner) error
@@ -163,10 +183,16 @@ fn travel(r:Runner,x:int64,y:int64) error
 	{
 		if r.State.X==x and r.State.Y==y { ret nil }
 		direction,e=planStep(r.State,x,y);if e!=nil { ret e }
+		if direction==4 { e=r.Do("climb",0,0,4); if e!=nil { ret e }; continue }
 		e=r.Face(direction);if e!=nil { ret e }
 		front=session.FrontCell(r.State);object=r.State.Objects[front]&127
-		if object==0x0e or (object==0x15 and r.State.DoorOpen[front]==0)
-		{ e=r.Do("interact",0,0,2);if e!=nil { ret error(format("at {},{} facing{}: {}",r.State.X,r.State.Y,r.State.Facing,e.str())) } }
+		if object==0x0e or ((object==0x15 or object==0x0c) and r.State.DoorOpen[front]==0)
+		{
+			if object==0x15 and ((r.State.Objects[front]>>8)&7)==2
+			{ if r.State.Droids[0].Cooldowns[1]>0 { e=r.Advance(r.State.Droids[0].Cooldowns[1]); if e!=nil { ret e } }; e=r.Do("attack",0,1,18) }
+			else { e=r.Do("interact",0,0,2) }
+			if e!=nil { ret error(format("at {},{} facing{}: {}",r.State.X,r.State.Y,r.State.Facing,e.str())) }
+		}
 		front=session.FrontCell(r.State)
 		if (r.State.Objects[front]&127)==0x21
 		{ e=r.Do("attack",0,1,18);if e!=nil { ret e } }
@@ -174,6 +200,8 @@ fn travel(r:Runner,x:int64,y:int64) error
 		if r.State.MoveTimer>0 { e=r.Advance(r.State.MoveTimer);if e!=nil { ret e } }
 		e=r.Do("move",0,0,4);if e!=nil { ret e }
 		e=recharge(r);if e!=nil { ret e }
+		if r.State.BaseNumber>0
+		{ for loot=r.State.Loot { if !loot.Collected and loot.X==r.State.X and loot.Y==r.State.Y { e=r.Do("collect",0,0,0); if e!=nil { ret e }; break } } }
 	}
 	ret error("playthrough: movement bound exceeded")
 }
@@ -246,8 +274,83 @@ fn play(r:Runner) error
 	if !r.MidpointSaved or r.Twin==nil { ret error("playthrough: midway disk continuation was not verified") }
 	ret os.Writefile(".build/base-playthrough.tsv",r.Transcript)
 }
+fn reachableSide(s:session.State,x:int64,y:int64) int64
+{
+	dx:[]int64=[0,1,0,-1]; dy:[]int64=[-1,0,1,0]
+	for side=0; side<4; side+=1
+	{
+		tx=x+dx[side]; ty=y+dy[side]
+		if tx<0 or ty<0 or tx>=s.Width or ty>=s.Height or s.Tiles[ty*s.Width+tx]==0 { continue }
+		if tx==s.X and ty==s.Y { ret side }
+		_,e=planStep(s,tx,ty); if e==nil { ret side }
+	}
+	ret -1
+}
+fn approach(r:Runner,x:int64,y:int64) error
+{
+	side=reachableSide(r.State,x,y); if side<0 { ret error(format("playthrough: cannot approach {},{}",x,y)) }
+	dx:[]int64=[0,1,0,-1]; dy:[]int64=[-1,0,1,0]
+	e=travel(r,x+dx[side],y+dy[side]); if e!=nil { ret e }
+	ret r.Face((side+2)%4)
+}
+fn secondBase(r:Runner) error
+{
+	e=r.Travel(); if e!=nil { ret e }
+	e=approach(r,12,6); if e!=nil { ret e }
+	for droid=0; droid<4; droid+=1
+	{
+		for part=0; part<6; part+=1
+		{ if r.State.Droids[droid].Parts[part]<100 { e=r.Do("repair",droid,part,0); if e!=nil { ret e } } }
+	}
+	row:int64=-1
+	for index=0; index<len(r.State.Offers); index+=1
+	{ offer=r.State.Offers[index]; if offer.X==12 and offer.Y==6 and offer.Kind=="explosives" { row=index; break } }
+	if row<0 { ret error("playthrough: second-base shop has no explosives") }
+	e=r.Do("buy",0,row,0); if e!=nil { ret e }
+	for pass=0; pass<4; pass+=1
+	{
+		for cell=0; cell<len(r.State.SwitchTargets); cell+=1
+		{
+			target=r.State.SwitchTargets[cell]
+			if target<0 or r.State.DoorOpen[target]!=0 or reachableSide(r.State,cell%64,cell/64)<0 { continue }
+			e=approach(r,cell%64,cell/64); if e!=nil { ret e }
+			e=r.Do("interact",0,0,2); if e!=nil { ret e }
+		}
+	}
+	e=travel(r,31,4); if e!=nil { ret e }
+	e=r.Face(3); if e!=nil { ret e }
+	e=r.Do("interact",0,0,0); if e!=nil { ret e }
+	if !r.State.Probe { ret error("playthrough: second probe not recovered") }
+	println("Second probe recovered after {} total actions",r.Commands)
+	e=travel(r,60,4); if e!=nil { ret e }
+	e=r.Face(0); if e!=nil { ret e }
+	explosives:int64=-1
+	for index=0; index<len(r.State.Droids[0].Inventory); index+=1
+	{ item=r.State.Droids[0].Inventory[index]; if item.Kind=="explosives" and item.Quantity>0 { explosives=index; break } }
+	if explosives<0 { ret error("playthrough: purchased explosives missing") }
+	e=r.Do("equip-right",0,explosives,0); if e!=nil { ret e }
+	e=r.Do("interact",0,0,0); if e!=nil { ret e }
+	e=r.Do("equip-right",0,-1,0); if e!=nil { ret e }
+	e=travel(r,13,0); if e!=nil { ret e }
+	if r.State.SabotagePhase<2 { e=r.Advance(r.State.SabotageTicks); if e!=nil { ret e } }
+	e=r.Face(3); if e!=nil { ret e }
+	e=r.Do("interact",0,0,0); if e!=nil { ret e }
+	if !r.State.Escaped or !r.MidpointSaved { ret error("playthrough: second escape or combat continuation incomplete") }
+	ret os.Writefile(".build/campaign-playthrough.tsv",r.Transcript)
+}
 fn main()
 {
+	campaignMode=false; resume=false
+	for arg=argv
+	{ if arg=="--campaign" { campaignMode=true } else if arg=="--second-base" { campaignMode=true; resume=true } else { eprintln("usage: base-playthrough [--campaign | --second-base]"); exit(1) } }
+	if resume
+	{
+		payload,e=persistence.Load(".build/first-base-complete.captive"); if e!=nil { eprintln(e.str()); exit(1) }
+		state,e=session.Decode(payload); if e!=nil { eprintln(e.str()); exit(1) }
+		r=new Runner(state); transcript,e=os.Readfile(".build/base-playthrough.tsv"); if e!=nil { eprintln(e.str()); exit(1) }; r.Transcript=transcript
+		e=secondBase(r); if e!=nil { os.Writefile(".build/campaign-playthrough-failed.tsv",r.Transcript); eprintln(e.str()); exit(1) }
+		println("Second base completed with party carry-over and disk continuation"); ret
+	}
 	text,e=os.Readfile(".build/recovery/base0.tsv"); if e!=nil { eprintln(e.str()); exit(1) }
 	s,e=session.LoadBase(text); if e!=nil { eprintln(e.str()); exit(1) }
 	report,e=os.Readfile(".build/recovery/mapgen-seed0.txt"); if e!=nil { eprintln(e.str()); exit(1) }
@@ -262,4 +365,7 @@ fn main()
 	r=new Runner(s)
 	e=play(r);if e!=nil { os.Writefile(".build/base-playthrough-failed.tsv",r.Transcript); eprintln(e.str()); exit(1) }
 	println("Escaped through {} actions and {} ticks with deterministic continuation",r.Commands,r.State.Ticks)
+	e=persistence.Save(".build/first-base-complete.captive",session.Encode(r.State)); if e!=nil { eprintln(e.str()); exit(1) }
+	if campaignMode
+	{ e=secondBase(r); if e!=nil { os.Writefile(".build/campaign-playthrough-failed.tsv",r.Transcript); eprintln(e.str()); exit(1) }; println("Both bases completed with party carry-over and disk continuation") }
 }

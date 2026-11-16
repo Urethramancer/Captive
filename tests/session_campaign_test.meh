@@ -54,6 +54,9 @@ fn testOriginalSwitchAndPunchDoors(t:test.Tester)
 	_,e=session.Interact(s); t.expect(e!=nil,"punch door requires hand")
 	_,e=session.Attack(s,0,0); t.expect(e==nil,"bare hand opens punch door")
 	t.expect(session.Walkable(s,9,0),"punched doorway is traversable")
+	s.X=26; s.Y=4; s.Facing=2; s.Sabotaged=true; s.SabotagePhase=2; s.DoorOpen[5*64+26]=-1
+	_,e=session.Interact(s); t.expect(e==nil,"shutdown raiser wall remains operable as a passage")
+	t.equal(s.DoorOpen[5*64+26],-1,"shutdown cannot lower a raiser wall into the escape route")
 }
 
 fn testTravelCarriesPartyAndConsumesRouteProbe(t:test.Tester)
