@@ -86,7 +86,7 @@ relative path when resolving a nested module's native asset. The game's
 flags are required.
 
 `tools/build-game.sh` runs the native prerequisite and the complete static Meh
-project build using the LLVM backend, then places the app executable at
+project build using the compiler's default backend, then places the app executable at
 `.build/captive`. Source-file-only builds do not apply the root plan's archive
 link flags; use the project directory as the build input. The build cache defaults
 to ignored `.build/meh-cache`; an existing `MEH_CACHE_DIR` setting takes precedence.
