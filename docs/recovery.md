@@ -51,7 +51,7 @@ The [starting-game guide](https://captive.atari.org/Main/StartGame/StartGame.php
 
 ## Remaining verification
 
-The [original English manual](https://captive.atari.org/Main/ReleaseInfo/Manual/CaptiveManualEnglish.pdf) is available as scanned pages. The original MapGen hintbook provides complementary primary evidence. The actual Amiga game has not yet been played through alongside the export. Shop stock, socket fixture subtype, computer password text, trap triggers and door high-byte behaviour still require binary or gameplay validation. Preserve the raw fields; do not present provisional translations or numerical tuning as exact original behaviour.
+The [original English manual](https://captive.atari.org/Main/ReleaseInfo/Manual/CaptiveManualEnglish.pdf) is available as scanned pages. The original MapGen hintbook provides complementary primary evidence. The actual Amiga game has not yet been played through alongside the export. Combat scheduling, wear calculations, generator countdown and full equipment behaviour remain unverified. Preserve raw fields and identify provisional numerical tuning clearly.
 
 A packaged app must not claim first-base acceptance until its entire progression, including these remaining interactions and save/resume, has been exercised against the recovered evidence.
 
@@ -59,13 +59,7 @@ A packaged app must not claim first-base acceptance until its entire progression
 
 The [computer-placement description](https://captive.atari.org/Technical/MapGen/ShopsAndComputers.php) associates each probe computer with a Brains encounter and password clipboard. It also explicitly states that shop stock is managed by the game, outside the generator. Thus the generator export does **not** verify shop inventory or prices.
 
-The [item description](https://captive.atari.org/Tools/Items/Items.php) describes explosives applied to a generator and identifies the probe-computer password clipboard. The recovered Brains/clipboard/computer placement agrees. Original numerical combat stats are retained locally; translating them into hit points, damage or timing requires the main-game rules rather than assuming equivalence.
-
-Seed 0's report has eight doors, three pushable walls, three cupboard traps, no logic puzzles, no ladders or holes, no water/fire, no raiser walls and no grate traps. Its switch export is empty. These absences constrain implementation: later-base mechanics must not be placed into this base merely because they exist elsewhere in Captive.
-
-Door words retain state flags: the type is the high byte masked with `07`. First-base code forces non-zero types to `05`; the recovered doors have types `05` and `00`. Mapping those numbers to visual/interaction variants remains a main-module verification task. The entrance is separate from these eight doors.
-
-Confirmed topology and placements are distinct from unresolved main-module behaviour: exact door state semantics; cupboard-trap activation and release; socket/decor subtype mapping; shop stock and transaction rules; computer password text generation; combat scheduling; generator countdown; and effects after sabotage. These must remain explicitly provisional until checked against the supplied main module or original gameplay.
+Original numerical combat stats are retained locally. Translating them into hit points, damage or timing requires the main-game rules rather than assuming equivalence. Verified main-module results and their binary offsets are recorded below.
 
 ## Repeating extraction
 
