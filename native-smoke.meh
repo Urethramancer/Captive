@@ -1,0 +1,24 @@
+@inc src/host
+
+window = new host.Window("Captive — Meh host check")
+if !window.Valid() { eprintln("Cannot open native macOS window"); exit(1) }
+window.Begin(uint32(0x111820ff))
+window.Rect(32.0, 32.0, 1216.0, 560.0, uint32(0x223544ff))
+window.Text("CAPTIVE / native Meh bridge check", 64.0, 64.0, 30.0, uint32(0xe1dabdff))
+window.Text("First-base recovery in progress", 64.0, 112.0, 20.0, uint32(0x9ab2b9ff))
+for droid = 0; droid < 4; droid += 1
+{
+	x = 32.0 + float64(droid) * 308.0
+	window.Rect(x, 624.0, 292.0, 144.0, uint32(0x35494aff))
+	window.Text(format("DROID {}", droid + 1), x + 16.0, 640.0, 18.0, uint32(0xd9e3d1ff))
+}
+window.Submit()
+silence = new([]byte)
+for frame = 0; frame < 800; frame += 1 { append(silence, byte(0)) }
+if !window.PlayPCM(silence, 8000, 0.0) { eprintln("{}", window.Error()); window.Close(); exit(1) }
+for tick = 0; tick < 20 and window.Pump(); tick += 1
+{
+	for window.Event() != 0 { }
+	sleep(10)
+}
+window.Close()

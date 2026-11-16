@@ -1,0 +1,90 @@
+@mod host
+@use "stdint.h"
+@impl objc captive_meh_create "captive_meh.m"
+@link darwin framework AppKit
+@link darwin framework AVFoundation
+@link darwin framework ImageIO
+
+extern fn captive_meh_create(title:string) uint64
+extern fn captive_meh_destroy(handle:uint64)
+extern fn captive_meh_pump(handle:uint64) int64
+extern fn captive_meh_event(handle:uint64) int64
+extern fn captive_meh_code(handle:uint64) int64
+extern fn captive_meh_repeat(handle:uint64) int64
+extern fn captive_meh_x(handle:uint64) float64
+extern fn captive_meh_y(handle:uint64) float64
+extern fn captive_meh_error(handle:uint64) string
+extern fn captive_meh_resources() string
+extern fn captive_meh_prompt(title:string, message:string, initial:string) string
+extern fn captive_meh_mouse_x(handle:uint64) float64
+extern fn captive_meh_mouse_y(handle:uint64) float64
+extern fn captive_meh_fullscreen(handle:uint64)
+extern fn captive_meh_begin(handle:uint64, rgba:uint32)
+extern fn captive_meh_rect(handle:uint64, x:float64, y:float64, w:float64, h:float64, rgba:uint32)
+extern fn captive_meh_text(handle:uint64, text:string, x:float64, y:float64, size:float64, rgba:uint32)
+extern fn captive_meh_load_image(handle:uint64, path:string) int64
+extern fn captive_meh_image(handle:uint64, image:int64, x:float64, y:float64, w:float64, h:float64)
+extern fn captive_meh_crop(handle:uint64, image:int64, sx:float64, sy:float64, sw:float64, sh:float64, x:float64, y:float64, w:float64, h:float64)
+extern fn captive_meh_submit(handle:uint64)
+extern fn captive_meh_capture(handle:uint64, path:string) int64
+extern fn captive_meh_audio_pause(handle:uint64, paused:int64)
+extern fn captive_meh_audio_clear(handle:uint64)
+extern fn captive_meh_pcm(handle:uint64, pcm:[]byte, rate:int64, gain:float64) int64
+extern fn captive_meh_sound_load(handle:uint64, path:string) int64
+extern fn captive_meh_sound_play(handle:uint64, sound:int64, gain:float64) int64
+
+const KeyW = 1
+const KeyS = 2
+const KeyA = 3
+const KeyD = 4
+const KeyQ = 5
+const KeyE = 6
+const KeyEscape = 7
+const KeyF1 = 8
+const KeyF2 = 9
+const KeyF3 = 10
+const KeyF4 = 11
+const KeyF5 = 12
+const KeyF9 = 13
+const KeyEnter = 14
+const KeySpace = 15
+
+// Window owns a native host. Call Close once and keep all calls on the main thread.
+class Window
+{
+	handle:uint64
+	fn init(title:string) { self.handle = captive_meh_create(title) }
+	fn Valid() bool { ret self.handle != 0 }
+	fn Close() { if self.handle != 0 { captive_meh_destroy(self.handle); self.handle = 0 } }
+	fn Pump() bool { ret captive_meh_pump(self.handle) != 0 }
+	fn Event() int64 { ret captive_meh_event(self.handle) }
+	fn Code() int64 { ret captive_meh_code(self.handle) }
+	fn Repeated() bool { ret captive_meh_repeat(self.handle) != 0 }
+	fn X() float64 { ret captive_meh_x(self.handle) }
+	fn Y() float64 { ret captive_meh_y(self.handle) }
+	fn MouseX() float64 { ret captive_meh_mouse_x(self.handle) }
+	fn MouseY() float64 { ret captive_meh_mouse_y(self.handle) }
+	fn Error() string { ret captive_meh_error(self.handle) }
+	fn Fullscreen() { captive_meh_fullscreen(self.handle) }
+	fn Begin(rgba:uint32) { captive_meh_begin(self.handle, rgba) }
+	fn Rect(x:float64, y:float64, w:float64, h:float64, rgba:uint32) { captive_meh_rect(self.handle, x, y, w, h, rgba) }
+	fn Text(text:string, x:float64, y:float64, size:float64, rgba:uint32) { captive_meh_text(self.handle, text, x, y, size, rgba) }
+	fn LoadImage(path:string) int64 { ret captive_meh_load_image(self.handle, path) }
+	fn Image(image:int64, x:float64, y:float64, w:float64, h:float64) { captive_meh_image(self.handle, image, x, y, w, h) }
+	fn ImageCrop(image:int64, sx:float64, sy:float64, sw:float64, sh:float64, x:float64, y:float64, w:float64, h:float64)
+	{ captive_meh_crop(self.handle, image, sx, sy, sw, sh, x, y, w, h) }
+	fn Submit() { captive_meh_submit(self.handle) }
+	fn Capture(path:string) bool { ret captive_meh_capture(self.handle, path) != 0 }
+	fn AudioPause(paused:bool) { if paused { captive_meh_audio_pause(self.handle, 1) } else { captive_meh_audio_pause(self.handle, 0) } }
+	fn AudioClear() { captive_meh_audio_clear(self.handle) }
+	fn PlayPCM(pcm:[]byte, rate:int64, gain:float64) bool { ret captive_meh_pcm(self.handle, pcm, rate, gain) != 0 }
+	fn LoadSound(path:string) int64 { ret captive_meh_sound_load(self.handle, path) }
+	fn PlaySound(sound:int64, gain:float64) bool { ret captive_meh_sound_play(self.handle, sound, gain) != 0 }
+	fn PlayWAV(path:string, gain:float64) bool { ret self.PlaySound(self.LoadSound(path), gain) }
+}
+
+// ResourcePath is empty for a standalone executable and points inside an app bundle otherwise.
+fn ResourcePath() string { ret captive_meh_resources() }
+
+// Prompt asks for text on the main thread, returning an empty string on cancellation.
+fn Prompt(title:string, message:string, initial:string) string { ret captive_meh_prompt(title, message, initial) }
