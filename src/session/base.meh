@@ -4,7 +4,7 @@
 // parseCell accepts only the export's bounded, unsigned decimal or hex cells.
 fn parseCell(text:string, base:int64, limit:int64) int64,error
 {
-	if len(text) < 1 or len(text) > 5 { ret 0,error("base: invalid cell length") }
+	if len(text) < 1 or len(text) > 10 { ret 0,error("base: invalid cell length") }
 	value:int64 = 0
 	for ch = strbytes(text)
 	{

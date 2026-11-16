@@ -1,0 +1,71 @@
+@mod session
+
+fn addInventory(d:Droid,item:Item) int64,error
+{
+	for index = 0; index < len(d.Inventory); index += 1
+	{ if d.Inventory[index].Quantity == 0 { d.Inventory[index] = item; ret index,nil } }
+	if len(d.Inventory) >= 64 { ret -1,error("inventory: no free slot") }
+	append(d.Inventory,item)
+	ret len(d.Inventory)-1,nil
+}
+
+// Use applies an owned battery to the selected droid's chest.
+// Capacity-to-energy scaling is provisional; a use always spends25%capacity.
+fn Use(s:State,droid:int64,index:int64) string,error
+{
+	if !canAct(s) or droid < 0 or droid >= 4 or index < 0 or index >= len(s.Droids[droid].Inventory)
+	{ ret "",error("equipment: invalid selection") }
+	d = s.Droids[droid]; item = d.Inventory[index]
+	if item.Quantity == 0 { ret "",error("equipment: item has been consumed") }
+	if s.CursorCharge > 0
+	{
+		item.Quantity = 0; item.Enabled = false; d.Inventory[index] = item
+		for hand = 0; hand < 2; hand += 1 { if d.Hands[hand] == index { d.Hands[hand] = -1 } }
+		append(s.SoundEvents,"explosion")
+		ret "Charged leader hand destroyed the item",nil
+	}
+	if item.Kind == "battery"
+	{
+		if item.Charge < 25 { ret "",error("battery: recharge at a power socket") }
+		if d.Energy >= 100 { ret "",error("battery: droid already fully charged") }
+		item.Charge -= 25; d.Energy += 25*(item.Quality+1)
+		if d.Energy > 100 { d.Energy = 100 }
+		d.Inventory[index] = item; append(s.SoundEvents,"charge")
+		ret "Battery applied to chest",nil
+	}
+	if item.Kind == "explosives"
+	{ e = Equip(s,droid,0,index); ret "Explosives held for generator sabotage",e }
+	ret "",error("equipment: this item is used through its hand action")
+}
+
+// RechargeItem docks an owned battery at a real, operational original socket.
+fn RechargeItem(s:State,droid:int64,index:int64) string,error
+{
+	cell = FrontCell(s)
+	if !canAct(s) or s.Sabotaged or cell < 0 or s.FixtureTypes[cell] != 0
+	{ ret "",error("socket: face an operational power socket") }
+	if droid < 0 or droid >= 4 or index < 0 or index >= len(s.Droids[droid].Inventory)
+	{ ret "",error("socket: invalid inventory selection") }
+	if s.CursorCharge > 0 { ret Use(s,droid,index) }
+	i = s.Droids[droid].Inventory[index]
+	if i.Kind != "battery" or i.Quantity == 0 { ret "",error("socket: only a battery can be docked here") }
+	i.Charge = 100; s.Droids[droid].Inventory[index] = i; append(s.SoundEvents,"charge")
+	ret "Battery recharged at socket",nil
+}
+
+// RepairItem fixes ordinary equipment at a shop. Zlots cannot be repaired.
+fn RepairItem(s:State,droid:int64,index:int64) string,error
+{
+	if !atShop(s) { ret "",error("shop: face an operational shop") }
+	if droid < 0 or droid >= 4 or index < 0 or index >= len(s.Droids[droid].Inventory)
+	{ ret "",error("shop: invalid inventory selection") }
+	i = s.Droids[droid].Inventory[index]
+	if i.Quantity == 0 or (i.Kind != "weapon" and i.Kind != "device" and i.Kind != "optic")
+	{ ret "",error("shop: this item cannot be repaired") }
+	cost = (100-i.Condition)*(i.Quality+1)
+	if cost <= 0 { ret "",error("shop: equipment already fully repaired") }
+	if s.Credits < cost { ret "",error("shop: insufficient gold") }
+	i.Condition = 100; s.Droids[droid].Inventory[index] = i; s.Credits -= cost
+	append(s.SoundEvents,"shop")
+	ret format("Equipment repaired for {} gold",cost),nil
+}

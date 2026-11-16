@@ -1,0 +1,56 @@
+@mod session
+@inc json
+
+fn encodeItemProperties(item:Item,v:json.JsonValue)
+{
+	setNumber(v,"code",item.Code); setNumber(v,"quality",item.Quality); setNumber(v,"price",item.Price)
+	v.Set("enabled",json.NewBool(item.Enabled))
+}
+fn decodeItemProperties(v:json.JsonValue,item:Item) Item,error
+{
+	code,e = number(v.Get("code"),0,255); if e != nil { ret item,e }; item.Code = code
+	quality,e = number(v.Get("quality"),0,7); if e != nil { ret item,e }; item.Quality = quality
+	price,e = number(v.Get("price"),0,2147483647); if e != nil { ret item,e }; item.Price = price
+	enabled = v.Get("enabled")
+	if !enabled.IsBool() { ret item,error("session save: missing equipment activation") }
+	item.Enabled = enabled.Bool()
+	ret item,nil
+}
+
+fn encodeCatalogue(s:State,o:json.JsonValue)
+{
+	rows = json.NewArray()
+	for row = s.Offers
+	{
+		v = json.NewObject(); setNumber(v,"shop",row.Shop); setNumber(v,"x",row.X); setNumber(v,"y",row.Y)
+		setNumber(v,"code",row.Code); setNumber(v,"category",row.Category); setNumber(v,"quality",row.Quality)
+		setNumber(v,"price",row.Price); setNumber(v,"data",row.ItemData); setNumber(v,"flags",row.Flags)
+		v.Set("kind",json.NewString(row.Kind)); v.Set("name",json.NewString(row.Name)); rows.Append(v)
+	}
+	o.Set("offers",rows)
+}
+fn decodeCatalogue(s:State,o:json.JsonValue) error
+{
+	rows = o.Get("offers")
+	if !rows.IsArray() or rows.Len() > 1024 { ret error("session save: invalid shop catalogue") }
+	s.Offers = new([]Offer)
+	for index = 0; index < rows.Len(); index += 1
+	{
+		v = rows.At(index); row = new Offer
+		shop,e = number(v.Get("shop"),1,6); if e != nil { ret e }; row.Shop = shop
+		x,e = number(v.Get("x"),0,s.Width-1); if e != nil { ret e }; row.X = x
+		y,e = number(v.Get("y"),0,s.Height-1); if e != nil { ret e }; row.Y = y
+		if (s.Objects[y*s.Width+x]&127) != 0x12 { ret error("session save: stock belongs to missing shop") }
+		code,e = number(v.Get("code"),0,255); if e != nil { ret e }; row.Code = code
+		category,e = number(v.Get("category"),-1,15); if e != nil { ret e }; row.Category = category
+		quality,e = number(v.Get("quality"),0,7); if e != nil { ret e }; row.Quality = quality
+		price,e = number(v.Get("price"),0,2147483647); if e != nil { ret e }; row.Price = price
+		data,e = number(v.Get("data"),0,65535); if e != nil { ret e }; row.ItemData = data
+		flags,e = number(v.Get("flags"),0,255); if e != nil { ret e }; row.Flags = flags
+		kind = v.Get("kind"); name = v.Get("name")
+		if !kind.IsString() or len(kind.Str()) < 1 or len(kind.Str()) > 40 or !name.IsString() or len(name.Str()) < 1 or len(name.Str()) > 80
+		{ ret error("session save: invalid catalogue description") }
+		row.Kind = kind.Str(); row.Name = name.Str(); append(s.Offers,row)
+	}
+	ret nil
+}

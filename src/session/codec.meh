@@ -35,12 +35,12 @@ fn Encode(s:State) string
 			i = json.NewObject(); i.Set("kind",json.NewString(item.Kind))
 			setNumber(i,"condition",item.Condition); setNumber(i,"charge",item.Charge)
 			setNumber(i,"ammunition",item.Ammunition); setNumber(i,"quantity",item.Quantity)
-			items.Append(i)
+			encodeItemProperties(item,i); items.Append(i)
 		}
 		v.Set("inventory",items); droids.Append(v)
 	}
 	o.Set("droids",droids)
-	encodeWorld(s,o)
+	encodeWorld(s,o); encodeCatalogue(s,o)
 	ret json.Marshal(o)
 }
 
@@ -146,6 +146,7 @@ fn Decode(text:string) State,error
 			item.Ammunition = valueAmmunition
 			valueQuantity,e = number(i.Get("quantity"),0,2147483647); if e != nil { ret nil,e }
 			item.Quantity = valueQuantity
+			decoded,e = decodeItemProperties(i,item); if e != nil { ret nil,e }; item = decoded
 			append(d.Inventory,item)
 		}
 		valueHands,e = numbers(v.Get("hands"),2,-1,len(d.Inventory)-1); if e != nil { ret nil,e }
@@ -154,6 +155,7 @@ fn Decode(text:string) State,error
 		append(s.Droids,d)
 	}
 	e = decodeWorld(s,o); if e != nil { ret nil,e }
+	e = decodeCatalogue(s,o); if e != nil { ret nil,e }
 	ret s,nil
 }
 

@@ -28,12 +28,21 @@ fn Sell(s:State,droid:int64,item:int64) string,error
 	if droid < 0 or droid >= 4 or item < 0 or item >= len(s.Droids[droid].Inventory)
 	{ ret "",error("shop: invalid inventory item") }
 	i = s.Droids[droid].Inventory[item]
-	if i.Quantity == 0 or i.Kind != "clue" { ret "",error("shop: item cannot be sold") }
+	if i.Quantity == 0 or (i.Kind != "clue" and i.Kind != "weapon" and i.Kind != "device" and i.Kind != "optic" and i.Kind != "ball" and i.Kind != "camera")
+	{ ret "",error("shop: item cannot be sold") }
 	price:int64 = 200
-	if i.Charge == 2 { price = 500 }
-	i.Quantity -= 1; s.Droids[droid].Inventory[item] = i; s.Credits += price
+	if i.Kind == "clue" { if i.Charge == 2 { price = 500 } }
+	else
+	{
+		price = i.Price*i.Condition/200
+		stocked = false; cell = FrontCell(s)
+		for row = s.Offers { if row.X == cell%s.Width and row.Y == cell/s.Width and row.Code == i.Code and row.Quality == i.Quality { stocked = true } }
+		if !stocked { price = price/2 }
+		if price < 1 { price = 1 }
+	}
+	i.Quantity -= 1; i.Enabled = false; s.Droids[droid].Inventory[item] = i; s.Credits += price
 	for hand = 0; hand < 2; hand += 1
 	{ if s.Droids[droid].Hands[hand] == item { s.Droids[droid].Hands[hand] = -1 } }
 	append(s.SoundEvents,"shop")
-	ret format("Clipboard sold for {} gold",price),nil
+	ret format("Item sold for {} gold",price),nil
 }

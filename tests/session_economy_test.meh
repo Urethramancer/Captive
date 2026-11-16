@@ -1,0 +1,67 @@
+@inc test
+@inc src/session
+@inc os
+
+fn shopParty() session.State
+{
+	s,e = session.New(3,3,[1,1,1,1,1,1,1,1,1],1,1,23)
+	if e != nil { eprintln(e.str()); exit(1) }
+	s.Objects[1] = 0x12
+	returnText = "shop\tx\ty\titem\tkind\tcategory\tquality\tprice\titemData\tflags\tname\n1\t1\t0\t31\tweapon\t0\t0\t49\t10\t21\tKNUCKLE-DUSTER\n1\t1\t0\t26\tbattery\t-1\t0\t5099\t23\t1\tBATTERY\n1\t1\t0\t30\tcamera\t-1\t0\t1200\t293\t16\tCAMERA\n"
+	e = session.LoadStock(s,returnText)
+	if e != nil { eprintln(e.str()); exit(1) }
+	ret s
+}
+
+fn testActualCatalogueGateAndPurchase(t:test.Tester)
+{
+	s = shopParty(); s.Credits = 49
+	_,e = session.Buy(s,0,0); t.expect(e == nil,"purchase implemented real catalogue row")
+	t.equal(s.Credits,0,"exact catalogue price charged")
+	t.equal(s.Droids[0].Inventory[0].Code,31,"original weapon code retained")
+	_,e = session.Buy(s,0,0); t.expect(e != nil,"insufficient funds rejected")
+	s.Credits = 10000; before = session.Encode(s)
+	_,e = session.Buy(s,0,2); t.expect(e != nil,"unimplemented camera cannot be purchased")
+	t.equalStr(session.Encode(s),before,"unsupported purchase changes no state")
+	s.Facing = 1
+	_,e = session.Buy(s,0,0); t.expect(e != nil,"purchase requires this actual shop")
+	s.Facing = 0
+	loaded,e = session.Decode(session.Encode(s)); t.expect(e == nil,"catalogue and item properties reload")
+	if e != nil { ret }
+	t.equalStr(session.Encode(loaded),session.Encode(s),"exact catalogue state roundtrip")
+}
+
+fn testBatteryOperationsAndChargedItemDestruction(t:test.Tester)
+{
+	s = shopParty(); s.Credits = 5099; s.Droids[0].Energy = 5
+	_,e = session.Buy(s,0,1); t.expect(e == nil,"battery purchase")
+	t.equal(s.Droids[0].Inventory[0].Charge,25,"new battery has25percent charge")
+	_,e = session.Use(s,0,0); t.expect(e == nil,"battery applies to chest")
+	t.equal(s.Droids[0].Energy,30,"provisional capacity applied")
+	t.equal(s.Droids[0].Inventory[0].Charge,0,"use spends quarter of capacity")
+	_,e = session.Use(s,0,0); t.expect(e != nil,"empty battery cannot recharge again")
+	s.FixtureTypes[1] = 0
+	_,e = session.RechargeItem(s,0,0); t.expect(e == nil,"battery docks at original socket")
+	t.equal(s.Droids[0].Inventory[0].Charge,100,"socket fully recharges battery")
+	_,e = session.Interact(s); t.expect(e == nil,"cursor now charged")
+	_,e = session.Use(s,0,0); t.expect(e == nil,"charged leader touch triggers destruction")
+	t.equal(s.Droids[0].Inventory[0].Quantity,0,"charged cursor destroys touched item")
+}
+
+fn testLoadOriginalStock(t:test.Tester)
+{
+	map,e = os.Readfile(".build/recovery/base0.tsv"); t.expect(e == nil,"original map available")
+	if e != nil { ret }
+	s,e = session.LoadBase(map); t.expect(e == nil,"map parses")
+	stock,e = os.Readfile(".build/recovery/base0-stock.tsv"); t.expect(e == nil,"original stock available")
+	if e != nil { ret }
+	e = session.LoadStock(s,stock); t.expect(e == nil,"actual stock parses")
+	t.equal(len(s.Offers),180,"all original stock records preserved")
+	knuckle:int64 = 0; battle:int64 = 0
+	for row = s.Offers
+	{
+		if row.Code == 31 { knuckle += 1; t.equal(row.X,24,"only original brawling shop stocks Knuckle-Dusters") }
+		if row.Code == 32 { battle += 1; t.equal(row.X,24,"only original brawling shop stocks Battle-Gloves") }
+	}
+	t.equal(knuckle,6,"six original Knuckle qualities"); t.equal(battle,4,"four original Battle qualities")
+}

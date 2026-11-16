@@ -27,15 +27,17 @@ fn collectAt(s:State,x:int64,y:int64) string,error
 	{
 		if !loot.Collected and loot.X == x and loot.Y == y
 		{
+			if s.CursorCharge > 0
+			{ loot.Collected = true; append(s.SoundEvents,"explosion"); ret "Charged leader hand destroyed the item; discharge before handling objects",nil }
 			if loot.Kind == "gold" { s.Credits += loot.Value }
 			else
 			{
 				d = s.Droids[s.Leader]
-				if len(d.Inventory) >= 64 { ret "",error("items: inventory full") }
 				i = new Item; i.Kind = loot.Kind; i.Condition = 100; i.Quantity = 1; i.Charge = loot.Value
 				// Item36 is Zlot1.9 (Knuckle-Duster); low packedbyte is endurance.
-				if i.Kind == "zlot" { i.Kind = "zlot-1.9"; i.Condition = conditionPercent(loot.Value & 255); i.Ammunition = 0 }
-				append(d.Inventory,i)
+				if i.Kind == "zlot" { i.Kind = "zlot-1.9"; i.Code = 54; i.Quality = (loot.Value>>13)&7; i.Condition = conditionPercent(loot.Value & 255); i.Ammunition = 0 }
+				if i.Kind == "clue" { i.Code = 102 }; if i.Kind == "explosives" { i.Code = 27 }
+				_,e = addInventory(d,i); if e != nil { ret "",e }
 			}
 			loot.Collected = true; count += 1
 		}
@@ -154,6 +156,12 @@ fn Attack(s:State,droid:int64,hand:int64) string,error
 	{
 		i = d.Inventory[itemIndex]
 		if i.Kind == "zlot-1.9" { range = 1; damage = 200+((i.Charge>>13)&7)*25 }
+		else if i.Kind == "weapon" and (i.Code == 31 or i.Code == 32)
+		{
+			required = 9+i.Quality; damage = 200+i.Quality*25
+			if i.Code == 32 { required = 17+i.Quality; damage = 400+i.Quality*25 }
+			if d.Skills[0] < required { ret "",error("combat: insufficient brawling skill for this weapon") }
+		}
 		else { ret "",error("combat: held item is not a weapon") }
 		if i.Condition <= 0 or i.Quantity <= 0
 		{ ret "",error("combat: weapon exhausted") }
@@ -185,6 +193,7 @@ fn Attack(s:State,droid:int64,hand:int64) string,error
 			{ i.Condition = 0; i.Charge = i.Charge & 65280; d.Parts[hand+2] -= 5; if d.Parts[hand+2] < 0 { d.Parts[hand+2] = 0 } }
 			if i.Condition <= 0 { i.Quantity = 0; d.Hands[hand] = -1 }
 		}
+		if i.Kind == "weapon" { i.Condition -= 1; if i.Condition <= 0 { i.Quantity = 0; d.Hands[hand] = -1 } }
 		d.Inventory[itemIndex] = i
 	}
 	d.Energy -= 1; d.Cooldowns[hand] = 18
@@ -217,6 +226,10 @@ fn Action(s:State,kind:string,a:int64,b:int64) string,error
 	if kind == "recharge-chest" { ret Charge(s,a) }
 	if kind == "spark" { ret Spark(s) }
 	if kind == "sell" { ret Sell(s,a,b) }
+	if kind == "buy" { ret Buy(s,a,b) }
+	if kind == "use" { ret Use(s,a,b) }
+	if kind == "recharge-item" { ret RechargeItem(s,a,b) }
+	if kind == "repair-item" { ret RepairItem(s,a,b) }
 	if kind == "leader" { e = SetLeader(s,a); ret "Leader changed",e }
 	if kind == "formation" { e = SwapFormation(s,a,b); ret "Formation changed",e }
 	ret "",error("session: unknown action")
@@ -230,6 +243,7 @@ fn Charge(s:State,droid:int64) string,error
 	if !canAct(s) or s.Sabotaged or cell < 0 or s.FixtureTypes[cell] != 0
 	{ ret "",error("socket: face an operational power socket") }
 	if droid < 0 or droid >= 4 { ret "",error("socket: invalid droid") }
+	if s.CursorCharge > 0 { ret "",error("socket: discharge the leader hand before moving the chest") }
 	s.Droids[droid].Energy = 100
 	append(s.SoundEvents,"charge")
 	ret "Droid chest recharged",nil

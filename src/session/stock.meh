@@ -1,0 +1,71 @@
+@mod session
+@inc strings
+
+class Offer
+{
+	Shop:int64
+	X:int64
+	Y:int64
+	Code:int64
+	Kind:string
+	Category:int64
+	Quality:int64
+	Price:int64
+	ItemData:int64
+	Flags:int64
+	Name:string
+}
+
+// LoadStock reads the original main-module shop catalogue exported locally.
+fn LoadStock(s:State,text:string) error
+{
+	lines = strings.SplitLines(strings.Trim(text))
+	if len(text) > 131072 or len(lines) < 2 or len(lines) > 1025 or lines[0] != "shop\tx\ty\titem\tkind\tcategory\tquality\tprice\titemData\tflags\tname"
+	{ ret error("stock: invalid catalogue header or size") }
+	rows = new([]Offer)
+	for index = 1; index < len(lines); index += 1
+	{
+		fields = strings.Split(lines[index],"\t")
+		if len(fields) != 11 { ret error("stock: invalid catalogue row") }
+		o = new Offer
+		shop,e = parseCell(fields[0],10,6); if e != nil { ret e }; o.Shop = shop
+		x,e = parseCell(fields[1],10,s.Width-1); if e != nil { ret e }; o.X = x
+		y,e = parseCell(fields[2],10,s.Height-1); if e != nil { ret e }; o.Y = y
+		if (s.Objects[y*s.Width+x]&127) != 0x12 { ret error("stock: catalogue shop is not in recovered map") }
+		code,e = parseCell(fields[3],10,255); if e != nil { ret e }; o.Code = code
+		o.Kind = fields[4]; o.Category = -1
+		if fields[5] != "-1" { category,e = parseCell(fields[5],10,15); if e != nil { ret e }; o.Category = category }
+		quality,e = parseCell(fields[6],10,7); if e != nil { ret e }; o.Quality = quality
+		price,e = parseCell(fields[7],10,2147483647); if e != nil { ret e }; o.Price = price
+		data,e = parseCell(fields[8],10,65535); if e != nil { ret e }; o.ItemData = data
+		flags,e = parseCell(fields[9],10,255); if e != nil { ret e }; o.Flags = flags
+		o.Name = fields[10]
+		append(rows,o)
+	}
+	s.Offers = rows
+	ret nil
+}
+
+// SupportedOffer prevents selling any item whose behaviour is not implemented.
+fn SupportedOffer(o:Offer) bool
+{
+	ret o.Kind == "battery" or o.Kind == "explosives" or (o.Kind == "weapon" and (o.Code == 31 or o.Code == 32))
+}
+
+// Buy purchases a real catalogue row from the shop directly ahead.
+fn Buy(s:State,droid:int64,row:int64) string,error
+{
+	if !atShop(s) { ret "",error("shop: face an operational shop") }
+	if droid < 0 or droid >= 4 or row < 0 or row >= len(s.Offers) { ret "",error("shop: invalid purchase") }
+	o = s.Offers[row]; cell = FrontCell(s)
+	if o.X != cell%s.Width or o.Y != cell/s.Width { ret "",error("shop: this shop does not stock that item") }
+	if !SupportedOffer(o) { ret "",error("shop: this equipment is not supported yet; no gold charged") }
+	if s.CursorCharge > 0 { ret "",error("shop: discharge the leader hand before handling items") }
+	if s.Credits < o.Price { ret "",error("shop: insufficient gold") }
+	d = s.Droids[droid]
+	i = new Item; i.Code = o.Code; i.Kind = o.Kind; i.Quality = o.Quality; i.Price = o.Price
+	i.Condition = 100; i.Quantity = 1
+	if o.Kind == "battery" { i.Charge = 25 }
+	_,e = addInventory(d,i); if e != nil { ret "",e }; s.Credits -= o.Price; append(s.SoundEvents,"shop")
+	ret format("Purchased {} for {} gold",o.Name,o.Price),nil
+}

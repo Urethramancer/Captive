@@ -9,6 +9,10 @@ struct Item
 	Charge:int64
 	Ammunition:int64
 	Quantity:int64
+	Code:int64
+	Quality:int64
+	Price:int64
+	Enabled:bool
 }
 
 class Droid
@@ -48,6 +52,7 @@ class State
 	FixtureTypes:[]int64
 	FixtureExtra:[]int64
 	TrapWall:[]int64
+	Offers:[]Offer
 	Width:int64
 	Height:int64
 	Probe:bool
@@ -79,7 +84,7 @@ fn New(width:int64, height:int64, tiles:[]int64, x:int64, y:int64, seed:int64) S
 	s.Terrain = new([]int64); s.Objects = new([]int64); s.Details = new([]int64)
 	s.Tiles = new([]int64)
 	for tile = tiles { append(s.Tiles, tile); append(s.Terrain,tile); append(s.Objects,0); append(s.Details,0) }
-	s.Enemies = new([]Enemy); s.Loot = new([]Loot); s.DoorOpen = new([]int64); s.SoundEvents = new([]string)
+	s.Offers = new([]Offer); s.Enemies = new([]Enemy); s.Loot = new([]Loot); s.DoorOpen = new([]int64); s.SoundEvents = new([]string)
 	s.FixtureTypes = new([]int64); s.FixtureExtra = new([]int64); s.TrapWall = new([]int64)
 	for at = 0; at < len(tiles); at += 1 { append(s.DoorOpen,0); append(s.FixtureTypes,-1); append(s.FixtureExtra,0); append(s.TrapWall,-1) }
 	s.Formation = [0,1,2,3]
