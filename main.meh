@@ -1,4 +1,5 @@
 @inc os
+@impl objc captive_host_create "native/captive_native.m"
 @inc strings
 @inc src/host
 @inc src/session

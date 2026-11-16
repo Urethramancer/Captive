@@ -11,7 +11,8 @@ Build with the installed Xcode command-line tools:
 ./tools/build-native.sh --smoke
 ```
 
-The first command creates `.build/native/libcaptive_native.a`. The second also
+The first command creates `.build/native/libcaptive_native.a` for the isolated
+native test. The game build compiles these sources itself. The second command also
 links and runs a short window and silent audio lifecycle check. The run needs
 access to the logged-in macOS window and audio services. Tests check key input,
 letterboxed mouse coordinates at 1280×800 through offscreen 4K sizes, event
@@ -64,7 +65,7 @@ UTF-8 error pointer remains valid until the next error or host destruction.
 Invalid arguments and voice exhaustion return false. Audio framework exceptions
 are converted to errors so an unavailable audio device does not crash gameplay.
 
-The eventual Meh executable links the static bridge plus the AppKit,
+The Meh executable links the compiled bridge plus the AppKit,
 AVFoundation and ImageIO frameworks. The bridge does not advance simulation
 time, manage saves, choose a base layout or add unrestricted navigation aids.
 
@@ -79,16 +80,17 @@ and the cached `PlayWAV` convenience accept the extracted WAV files directly.
 for a standalone executable. `Prompt` opens a native text prompt and returns an
 empty string on cancellation. `MouseX`/`MouseY` support hover tooltips.
 
-The current compiler's `@impl objc` compilation does not enable ARC. The adapter
-therefore contains no owned Objective-C objects and links the separately built
-ARC archive through the root `mehkfile`. Build the project with an absolute
-source directory (`mehc build -F "$PWD"`) to avoid the compiler's duplicated
-relative path when resolving a nested module's native asset. The game's
-`--smoke` mode exercises the Meh adapter with real artwork. No special Pinball
-flags are required.
+The current compiler's `@impl objc` compilation does not enable ARC. The root
+`mehkfile` selects `tools/compile-native.sh` through `CC`; it enables ARC for
+Objective-C inputs and preserves a caller-selected C compiler through
+`CAPTIVE_NATIVE_CC`. The native implementation is declared by `main.meh` and
+compiled alongside its adapter. No prebuilt archive or preliminary script is
+required. The plan resolves its entry source to an absolute path to avoid the
+compiler's duplicated relative native-asset path. Plain `mehc build` works from
+the project directory. The game's `--smoke` mode exercises the Meh adapter with
+real artwork. No special Pinball flags are required.
 
-`tools/build-game.sh` runs the native prerequisite and the complete static Meh
-project build using the compiler's default backend, then places the app executable at
-`.build/captive`. Source-file-only builds do not apply the root plan's archive
-link flags; use the project directory as the build input. The build cache defaults
+`tools/build-game.sh` runs the complete static Meh project build using the
+compiler's default backend, then places the app executable at `.build/captive`.
+Use the project plan so the native compiler is configured. The build cache defaults
 to ignored `.build/meh-cache`; an existing `MEH_CACHE_DIR` setting takes precedence.

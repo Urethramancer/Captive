@@ -13,8 +13,9 @@ belong under `.build/`; neither original assets nor binaries are committed.
 
 Install a current `mehc` compiler, Xcode command-line tools and Go for the local
 inspection tools. Check `mehc --version`; development began with the installed
-v0.76.0 compiler. The build script uses its default backend and builds the fresh
-native bridge before linking the statically embedded Meh libraries. The RNC
+v0.76.0 compiler. `mehc build` compiles both the Meh code and native bridges;
+no prebuilt native archive is required. The project selects a small C compiler
+wrapper to enable ARC for Objective-C sources. The RNC
 extractor explicitly selects LLVM for a current direct-backend limitation.
 
 ```sh
@@ -22,8 +23,8 @@ extractor explicitly selects LLVM for a current direct-backend limitation.
 ./tools/inspect-assets.sh
 MEH_BACKEND=llvm mehc build audio-export.meh -o .build/audio-export -F
 .build/audio-export build/extracted/federation build/extracted/Fed_Sounds .build/data/audio
-./tools/build-game.sh
-./.build/captive
+mehc build
+./captive
 ```
 
 The map, fixture, trap, shop and encounter exports under `.build/recovery/` are
@@ -41,6 +42,9 @@ open .build/Captive.app
 The app includes its required local assets. Manual saves, quicksaves and its
 separate base-entry checkpoint live in Application Support when packaged; the
 development executable uses `saves/`. Neither location is tracked.
+`tools/build-game.sh` builds the static executable at `.build/captive` used by
+packaging. `tools/test-build.sh` checks a clean source copy with an empty cache
+and no native archive, including builds invoked from another directory.
 
 The action-driven acceptance replay generates its transcript from the recovered
 base and checks disk continuation during combat:

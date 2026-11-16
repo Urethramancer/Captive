@@ -1,11 +1,26 @@
 @inc mehk
+@inc os
 
 fn targets()
 {
+	// Resolve source paths once: relative entry paths are mishandled by the
+	// current compiler when loading nested Objective-C implementations.
+	root,e = os.AbsPath(os.Envstr("MEHK_DIR","."))
+	if e != nil { eprintln(e.str()); exit(1) }
+	// mehc honours CC for native implementations; keep any caller-selected
+	// compiler behind the wrapper that supplies Objective-C ARC.
+	compiler = os.PathJoin(root,"tools/compile-native.sh")
+	previous = os.Envstr("CC","")
+	if previous != compiler
+	{
+		e = os.Setenv("CAPTIVE_NATIVE_CC",previous)
+		if e != nil { eprintln(e.str()); exit(1) }
+	}
+	e = os.Setenv("CC",compiler)
+	if e != nil { eprintln(e.str()); exit(1) }
 	p = mehk.Project("local/captive")
 	p.Directory(".build")
 	g = p.Binary("captive")
-	g.Source("main.meh")
-	g.LinkFlags("release", ".build/native/libcaptive_native.a")
+	g.Source(os.PathJoin(root,"main.meh"))
 	mehk.AddProject(p)
 }
