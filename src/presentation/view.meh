@@ -15,6 +15,24 @@ fn absolute(v:float64) float64 { if v < 0.0 { ret -v }; ret v }
 fn inside(x:float64, y:float64, left:float64, top:float64, width:float64, height:float64) bool
 { ret x >= left and y >= top and x < left+width and y < top+height }
 
+fn equipmentName(kind:string,quality:int64,fallback:string) string
+{
+	if quality<0 or quality>7 { ret fallback }
+	if kind=="device"
+	{ names:[]string=["Anti-Grav","Shield","Fire Shield","Speed Boost","Power Zapper","Fixer","Recharger","Deflector"]; ret names[quality] }
+	if kind=="optic"
+	{ names:[]string=["AGScan","Root Finder","Mapper","Radar","Compass","Body Scan","Vision Corrector","Visor"]; ret names[quality] }
+	ret fallback
+}
+fn stockName(offer:session.Offer) string
+{
+	if offer.Kind=="ammo" and offer.Code>=77 and offer.Code<=87
+	{ names:[]string=["20mm clip","45mm clip","50mm clip","Cartridges","20mm auto-clip","45mm auto-clip","50mm auto-clip","A51 missiles","Shells","Laser pack","Sonic pack"]; ret names[offer.Code-77] }
+	if (offer.Kind=="weapon" or offer.Kind=="battery") and offer.Quality>=0 and offer.Quality<8
+	{ qualities:[]string=["Basic","II","III","IV","V","VI","VII","Super"]; ret qualities[offer.Quality]+" "+offer.Name }
+	ret equipmentName(offer.Kind,offer.Quality,offer.Name)
+}
+
 // View owns presentation state only; all game actions go through session.
 class View
 {
@@ -22,6 +40,7 @@ class View
 	Inventory:int64
 	Page:int64
 	StockPage:int64
+	SelectedItem:int64
 	Offers:[]int64
 	Message:string
 	Original:bool
@@ -31,6 +50,8 @@ class View
 	OriginalScavenger:int64
 	OriginalBrains:int64
 	Wall:int64
+	WallSets:[]int64
+	ZoneHeight:int64
 	Door:int64
 	Generator:int64
 	Terminal:int64
@@ -44,9 +65,11 @@ class View
 	fn init(window:host.Window)
 	{
 		self.Window = window; self.Inventory = -1
+		self.SelectedItem=-1
 		self.Message = "Recover the probe. Disable the generators. Return to the entrance."
 		self.Depth = new([]float64)
 		self.Rays=460; self.RayWidth=2.0
+		self.WallSets=new([]int64); self.ZoneHeight=8
 	}
 	fn Button(label:string, x:float64, y:float64, width:float64)
 	{
@@ -55,15 +78,34 @@ class View
 		self.Window.Text(label,x+8.0,y+7.0,13.0,ink)
 	}
 	fn blocked(s:session.State, x:int64, y:int64) bool
-	{ ret !session.Walkable(s,x,y) }
+	{
+		if x>=0 and y>=0 and x<s.Width and y<s.Height and (s.Objects[y*s.Width+x]&127)==0x32 and !session.HasEquipment(s,"optic",6) { ret true }
+		ret !session.Walkable(s,x,y)
+	}
+	fn Material(y:int64) int64
+	{
+		if len(self.WallSets)==0 or self.ZoneHeight<1 { ret self.Wall }
+		zone=y/self.ZoneHeight; if zone<0 { zone=0 }; if zone>=len(self.WallSets) { zone=len(self.WallSets)-1 }
+		ret self.WallSets[zone]
+	}
+	fn ItemName(s:session.State,item:session.Item) string
+	{
+		if item.Kind=="clue" { ret "Clipboard" }; if item.Kind=="probe" { ret "Planet Probe" }
+		for offer=s.Offers { if offer.Code==item.Code and offer.Quality==item.Quality and offer.Kind==item.Kind { ret stockName(offer) } }
+		ret equipmentName(item.Kind,item.Quality,item.Kind)
+	}
 	fn Corridor(s:session.State)
 	{
 		w = self.Window
+		eyeX,eyeY,eyeFacing,remote=session.CameraView(s)
 		w.Rect(24.0,78.0,928.0,500.0,uint32(0x030707ff))
-		w.Rect(28.0,82.0,920.0,246.0,uint32(0x161d1bff))
-		w.Rect(28.0,328.0,920.0,246.0,uint32(0x30312aff))
+		ceiling:uint32=0x161d1bff; floor:uint32=0x30312aff
+		if eyeY>=8 and eyeY<16 { ceiling=0x101a21ff; floor=0x242c30ff }
+		if eyeY>=16 { ceiling=0x14211cff; floor=0x233126ff }
+		w.Rect(28.0,82.0,920.0,246.0,ceiling)
+		w.Rect(28.0,328.0,920.0,246.0,floor)
 		dx:[]float64 = [0.0,1.0,0.0,-1.0]; dy:[]float64 = [-1.0,0.0,1.0,0.0]
-		forwardX = dx[s.Facing]; forwardY = dy[s.Facing]
+		forwardX = dx[eyeFacing]; forwardY = dy[eyeFacing]
 		self.Depth = new([]float64)
 		self.Rays=460; if self.Original { self.Rays=230 }; self.RayWidth=920.0/float64(self.Rays)
 		for column = 0; column < self.Rays; column += 1
@@ -74,7 +116,7 @@ class View
 			deltaX = 1000000.0; deltaY = 1000000.0
 			if absolute(rayX) > 0.000001 { deltaX = absolute(1.0/rayX) }
 			if absolute(rayY) > 0.000001 { deltaY = absolute(1.0/rayY) }
-			x = s.X; y = s.Y; stepX:int64 = 1; stepY:int64 = 1
+			x = eyeX; y = eyeY; stepX:int64 = 1; stepY:int64 = 1
 			if rayX < 0.0 { stepX = -1 }; if rayY < 0.0 { stepY = -1 }
 			distX = deltaX*0.5; distY = deltaY*0.5; distance = 0.5; side:int64 = 0
 			for step = 0; step < 128; step += 1
@@ -91,10 +133,10 @@ class View
 			light = int64(100.0/(1.0+distance*0.18)); if side == 1 { light-=15 }
 			w.Rect(28.0+float64(column)*self.RayWidth,top,self.RayWidth+0.1,height,shade(light))
 			// Panel seams follow world coordinates, keeping quarter turns aligned.
-			coordinate = float64(s.X)+0.5+distance*rayX
-			if side == 0 { coordinate = float64(s.Y)+0.5+distance*rayY }
+			coordinate = float64(eyeX)+0.5+distance*rayX
+			if side == 0 { coordinate = float64(eyeY)+0.5+distance*rayY }
 			fraction = coordinate-float64(int64(coordinate))
-			texture=self.Wall
+			texture=self.Material(y)
 			if self.Original and self.OriginalWall>0 { texture=self.OriginalWall }
 			if x>=0 and y>=0 and x<s.Width and y<s.Height and (s.Objects[y*s.Width+x]&127)==0x15 { texture=self.Door }
 			if self.Original and x>=0 and y>=0 and x<s.Width and y<s.Height and (s.Objects[y*s.Width+x]&127)==0x15 and self.OriginalDoor>0 { texture=self.OriginalDoor }
@@ -109,11 +151,34 @@ class View
 			{ w.Rect(28.0+float64(column)*self.RayWidth,top,self.RayWidth+0.1,height,shade(light-30)) }
 			w.Rect(28.0+float64(column)*self.RayWidth,top+height*0.70,self.RayWidth+0.1,2.0,shade(light-24))
 			w.Rect(28.0+float64(column)*self.RayWidth,top,self.RayWidth+0.1,2.0,shade(light+25))
+			if x>=0 and y>=0 and x<s.Width and y<s.Height
+			{
+				cell=y*s.Width+x; px=28.0+float64(column)*self.RayWidth
+				if s.FixtureTypes[cell]==0 and fraction>0.34 and fraction<0.66
+				{
+					plateTop=328.0-fullHeight*0.14; plateHeight=fullHeight*0.28
+					if plateTop<84.0 { plateTop=84.0 }; if plateTop+plateHeight>548.0 { plateHeight=548.0-plateTop }
+					w.Rect(px,plateTop,self.RayWidth+0.1,plateHeight,uint32(0x887952ff))
+					w.Rect(px,plateTop+plateHeight*0.20,self.RayWidth+0.1,plateHeight*0.60,uint32(0x101a18ff))
+					if fraction>0.44 and fraction<0.56 { w.Rect(px,plateTop+plateHeight*0.31,self.RayWidth+0.1,plateHeight*0.14,amber); w.Rect(px,plateTop+plateHeight*0.60,self.RayWidth+0.1,plateHeight*0.14,amber) }
+				}
+				if (s.Objects[cell]&127)==0x0e and fraction>0.12 and fraction<0.88
+				{ yy=328.0+fullHeight*0.28; if yy<548.0 { w.Rect(px,yy,self.RayWidth+0.1,4.0,uint32(0xa18d62ff)) } }
+			}
 		}
-		self.Entities(s,forwardX,forwardY)
+		self.Entities(s,forwardX,forwardY,eyeX,eyeY)
+		self.Fire(s,forwardX,forwardY,eyeX,eyeY)
+		if session.Blinded(s) and !remote
+		{ w.Rect(28.0,82.0,920.0,470.0,uint32(0x210b06ff)); w.Text("OPTIC LINK OVERLOADED",334.0,304.0,23.0,amber) }
 		w.Rect(28.0,552.0,920.0,22.0,uint32(0x0d171bdc))
-		w.Text("W / S  advance / retreat     A / D  strafe     Q / E  quarter turn",44.0,556.0,13.0,ink)
-		if self.Original { w.Text("ORIGINAL ART / REMASTER RENDERER",44.0,92.0,12.0,ink) }
+		if remote { w.Text("REMOTE CAMERA  ·  W forward  ·  Q / E turn",44.0,556.0,13.0,ink) }
+		else { w.Text("W / S  advance / retreat     A / D  strafe     Q / E  quarter turn",44.0,556.0,13.0,ink) }
+		if self.Original { w.Text("ORIGINAL ART COMPARISON",44.0,92.0,12.0,ink) }
+		if session.Ceiling(s) and !remote { w.Text("ANTI-GRAV / CEILING",44.0,112.0,12.0,amber) }
+		if session.HasEquipment(s,"optic",6) { w.Text("VISION CORRECTOR ACTIVE",44.0,132.0,12.0,amber) }
+		if len(s.Cameras)>0 { self.Button("NEXT LINK",684.0,92.0,112.0); if remote { self.Button("DETONATE",804.0,92.0,128.0) } }
+		if s.CursorCharge>0 and !remote
+		{ self.Button(format("SPARK {}",s.CursorCharge),804.0,132.0,128.0); w.Text("CHARGED: ITEMS UNSAFE",790.0,169.0,10.0,amber) }
 	}
 	fn Billboard(image:int64, label:string, distance:float64, lateral:float64)
 	{
@@ -137,7 +202,7 @@ class View
 		}
 		if visible and centre>70.0 and centre<900.0 and distance<4.0 and top>104.0 { self.Window.Text(label,centre-44.0,top-22.0,14.0,amber) }
 	}
-	fn Entities(s:session.State, forwardX:float64, forwardY:float64)
+	fn Entities(s:session.State, forwardX:float64, forwardY:float64, eyeX:int64, eyeY:int64)
 	{
 		// Far-to-near billboards, with each strip checked against the same wall depth.
 		for pass=16; pass>=0; pass-=1
@@ -146,7 +211,7 @@ class View
 			{
 				alive:int64=0; for health=enemy.Health { if health>0 { alive+=1 } }
 				if alive==0 { continue }
-				rx=float64(enemy.X-s.X); ry=float64(enemy.Y-s.Y)
+				rx=float64(enemy.X-eyeX); ry=float64(enemy.Y-eyeY)
 				distance=rx*forwardX+ry*forwardY; if int64(distance)!=pass { continue }
 				lateral=-rx*forwardY+ry*forwardX
 				image=self.Scavenger; if enemy.Kind=="Tree" { image=self.Tree }; if enemy.Kind=="Brains" { image=self.Brains }
@@ -159,7 +224,7 @@ class View
 			{
 				kind=s.Objects[cell]&127
 				if kind!=9 and kind!=0x12 and kind!=0x13 { continue }
-				rx=float64(cell%s.Width-s.X); ry=float64(cell/s.Width-s.Y)
+				rx=float64(cell%s.Width-eyeX); ry=float64(cell/s.Width-eyeY)
 				distance=rx*forwardX+ry*forwardY
 				if int64(distance)!=pass { continue }
 				lateral=-rx*forwardY+ry*forwardX
@@ -167,6 +232,31 @@ class View
 				if kind==9 { image=self.Generator; label="GENERATOR"; distance-=0.51 }
 				if kind==0x12 { label="SHOP" }
 				self.Billboard(image,label,distance,lateral)
+			}
+		}
+	}
+	fn Fire(s:session.State, forwardX:float64, forwardY:float64, eyeX:int64, eyeY:int64)
+	{
+		for cell=0; cell<len(s.Fire); cell+=1
+		{
+			if s.Fire[cell]==0 { continue }
+			rx=float64(cell%s.Width-eyeX); ry=float64(cell/s.Width-eyeY)
+			distance=rx*forwardX+ry*forwardY; lateral=-rx*forwardY+ry*forwardX
+			if cell==eyeY*s.Width+eyeX { distance=0.25 }
+			if distance<0.15 or distance>12.0 { continue }
+			size=460.0/distance; width=size*0.7; centre=488.0+lateral/distance*696.0; left=centre-width*0.5
+			first=int64((left-28.0)/self.RayWidth); last=int64((left+width-28.0)/self.RayWidth)
+			if first<0 { first=0 }; if last>=self.Rays { last=self.Rays-1 }
+			for column=first; column<=last; column+=1
+			{
+				if distance-0.3>=self.Depth[column] { continue }
+				x=28.0+float64(column)*self.RayWidth; u=(x-left)/width
+				pulse=float64((s.Ticks/4+cell*13+column*7)%17)*0.006
+				height=size*(0.25+(0.5-absolute(u-0.5))*0.6+pulse)
+				bottom=328.0+size*0.48; if bottom>548.0 { bottom=548.0 }; top=bottom-height; if top<82.0 { top=82.0 }
+				if top>=bottom { continue }
+				self.Window.Rect(x,top,self.RayWidth+0.1,bottom-top,uint32(0xf16f2abb))
+				self.Window.Rect(x,top+(bottom-top)*0.55,self.RayWidth+0.1,(bottom-top)*0.45,uint32(0xffd36ccd))
 			}
 		}
 	}
@@ -194,10 +284,37 @@ class View
 		for hand=0; hand<2; hand+=1
 		{
 			label="BARE HAND"; item=d.Hands[hand]
-			if item >= 0 and item < len(d.Inventory) { label=d.Inventory[item].Kind }
+			if item >= 0 and item < len(d.Inventory) { label=self.ItemName(s,d.Inventory[item]); if len(label)>14 { label=label[:14]+"…" } }
 			self.Button(label,x+10.0+float64(hand)*146.0,704.0,138.0)
 		}
-		w.Text(format("F{} inventory   ·   click name to lead",index+1),x+12.0,742.0,11.0,muted)
+		if session.HasEquipment(s,"optic",5)
+		{ w.Text(format("H{} C{} A{}/{} L{}/{}",d.Parts[0],d.Parts[1],d.Parts[2],d.Parts[3],d.Parts[4],d.Parts[5]),x+12.0,742.0,11.0,ink) }
+		else { w.Text(format("F{} inventory   ·   click name to lead",index+1),x+12.0,742.0,11.0,muted) }
+	}
+	fn Navigation(s:session.State)
+	{
+		w=self.Window; text=session.Navigation(s)
+		if text!="" { w.Text(text,984.0,432.0,14.0,amber) }
+		localMap,e=session.LocalMap(s)
+		if e==nil
+		{
+			w.Text("MAPPER",984.0,458.0,11.0,muted)
+			for i=0; i<len(localMap); i+=1
+			{
+				colour:uint32=0x06100fff; if localMap[i]==0 { colour=0x52615aff }; if localMap[i]>0 { colour=0x9a9a6bff }; if i==38 { colour=ink }
+				w.Rect(984.0+float64(i%11)*8.0,478.0+float64(i/11)*8.0,7.0,7.0,colour)
+			}
+		}
+		radar,e=session.Radar(s)
+		if e==nil
+		{
+			w.Text("RADAR",1112.0,458.0,11.0,muted)
+			for i=0; i<len(radar); i+=1
+			{
+				colour:uint32=0x193029ff; if radar[i]>0 { colour=0xe49b65ff }; if i==40 { colour=ink }
+				w.Rect(1112.0+float64(i%9)*8.0,478.0+float64(i/9)*8.0,7.0,7.0,colour)
+			}
+		}
 	}
 	fn Draw(s:session.State)
 	{
@@ -215,7 +332,9 @@ class View
 		w.Text(format("CREDITS   {}",s.Credits),984.0,126.0,15.0,ink)
 		probe="PROBE   NOT RECOVERED"; if s.Probe { probe="PROBE   SECURED" }
 		w.Text(probe,984.0,154.0,13.0,muted)
-		if s.Sabotaged { w.Text(format("CORE  {} seconds",s.SabotageTicks/60),984.0,172.0,12.0,amber) }
+		if s.SabotagePhase==1 { w.Text(format("EXPLOSIVES ARMED  {}s",s.SabotageTicks/60),984.0,172.0,12.0,amber) }
+		if s.SabotagePhase==2 { w.Text("GENERATORS BURNING — ESCAPE",984.0,172.0,12.0,amber) }
+		if s.SabotagePhase==3 { w.Text("BASE SYSTEMS OFFLINE",984.0,172.0,12.0,amber) }
 		front=session.FrontCell(s); shop=front>=0 and (s.Objects[front]&127)==0x12
 		if shop { self.Button("STOCK",984.0,188.0,116.0); self.Button("SELL HELD",1108.0,188.0,124.0) }
 		else { self.Button("INTERACT  /  SPACE",984.0,188.0,248.0) }
@@ -228,7 +347,9 @@ class View
 			{
 				i=self.Page*7+row; if i>=len(d.Inventory) { break }
 				item=d.Inventory[i]; yy=290.0+float64(row)*34.0
-				self.Button(format("{}  {}%  ×{}",item.Kind,item.Condition,item.Quantity),984.0,yy,248.0)
+				label=self.ItemName(s,item); if len(label)>14 { label=label[:14] }; status=""; if item.Enabled { status=" ON" }
+				if self.SelectedItem==i { label="> "+label }
+				self.Button(format("{} {}% ×{}{}",label,item.Condition,item.Quantity,status),984.0,yy,248.0)
 			}
 			if len(d.Inventory)==0 { w.Text("No carried equipment",984.0,294.0,14.0,muted) }
 			self.Button("PREVIOUS",984.0,536.0,116.0); self.Button("NEXT",1108.0,536.0,124.0)
@@ -237,12 +358,13 @@ class View
 		{
 			self.Offers=new([]int64)
 			for i=0; i<len(s.Offers); i+=1 { offer=s.Offers[i]; if offer.X==front%s.Width and offer.Y==front/s.Width { append(self.Offers,i) } }
+			if self.StockPage*7>=len(self.Offers) { self.StockPage=0 }
 			w.Text(format("STOCK / {}",s.Droids[s.Leader].Name),984.0,238.0,15.0,amber)
 			w.Text("Click an available item to buy.",984.0,264.0,12.0,muted)
 			for row=0; row<7; row+=1
 			{
 				at=self.StockPage*7+row; if at>=len(self.Offers) { break }
-				o=s.Offers[self.Offers[at]]; label=o.Name; if len(label)>15 { label=label[:15] }
+				o=s.Offers[self.Offers[at]]; label=stockName(o); if len(label)>15 { label=label[:15] }
 				label=format("{}  {}g",label,o.Price); yy=290.0+float64(row)*34.0
 				self.Button(label,984.0,yy,248.0)
 				if !session.SupportedOffer(o) { w.Rect(984.0,yy,248.0,30.0,uint32(0x101b19ba)); w.Text("UNAVAILABLE",992.0,yy+7.0,12.0,muted) }
@@ -257,6 +379,7 @@ class View
 			w.Text("F1–F4 inspect each droid.",984.0,344.0,13.0,muted)
 			w.Text("F5 quicksave  ·  F9 quickload",984.0,373.0,13.0,muted)
 			w.Text("Escape pauses the simulation.",984.0,402.0,12.0,muted)
+			self.Navigation(s)
 		}
 		for droid=0; droid<4; droid+=1 { self.DroidPanel(s,droid) }
 		w.Text(self.Message,28.0,776.0,13.0,ink)
@@ -264,14 +387,15 @@ class View
 		if inside(mx,my,984.0,290.0,248.0,238.0) and self.Inventory>=0
 		{
 			i=self.Page*7+int64((my-290.0)/34.0); d=s.Droids[self.Inventory]
-			if i<len(d.Inventory) { item=d.Inventory[i]; hint=format("{}: condition{}%, ammunition{}, charge{}. Click left / right button to equip.",item.Kind,item.Condition,item.Ammunition,item.Charge) }
+			if i<len(d.Inventory) { item=d.Inventory[i]; hint=format("{}: condition{}%, ammo{}, charge{}. Click left/right to equip; right-click another droid name to give it.",self.ItemName(s,item),item.Condition,item.Ammunition,item.Charge) }
 		}
 		for i=0; i<4; i+=1
 		{
 			left=24.0+float64(i)*310.0
-			if inside(mx,my,left+68.0,608.0,152.0,28.0) { hint=s.Droids[i].Name+" · Click to select this droid as leader." }
+			if inside(mx,my,left+68.0,608.0,152.0,28.0) { hint=s.Droids[i].Name+" · Click to lead. Right-click to receive the selected inventory item." }
 			if inside(mx,my,left+220.0,608.0,82.0,28.0) { hint="Click FRONT/REAR to swap with the other row; right-click swaps left/right." }
 			if inside(mx,my,left,661.0,302.0,31.0) { hint="Body condition: head, chest, left/right arms, left/right legs. Click a part facing a shop to repair." }
+			if inside(mx,my,left,704.0,302.0,30.0) { hint="Click a hand to use it. Right-click held equipment while facing a shop to repair it." }
 		}
 		if hint!="" { w.Rect(20.0,764.0,1240.0,32.0,uint32(0x0a1715ff)); w.Text(hint,28.0,774.0,12.0,ink) }
 		if s.Paused
@@ -292,6 +416,12 @@ class View
 	// Click returns an action for the application boundary to dispatch.
 	fn Click(s:session.State, x:float64, y:float64, button:int64) string
 	{
+		if s.CursorCharge>0 and s.CameraIndex<0 and inside(x,y,804.0,132.0,128.0,30.0) { ret "spark" }
+		if len(s.Cameras)>0
+		{
+			if inside(x,y,684.0,92.0,112.0,30.0) { ret "camera-view" }
+			if s.CameraIndex>=0 and inside(x,y,804.0,92.0,128.0,30.0) { ret "camera-detonate" }
+		}
 		front=session.FrontCell(s)
 		if front>=0 and (s.Objects[front]&127)==0x12
 		{
@@ -312,7 +442,7 @@ class View
 		if inside(x,y,848.0,28.0,64.0,30.0) { self.Original=!self.Original; ret "" }
 		if inside(x,y,920.0,28.0,112.0,30.0) { self.Window.Fullscreen(); ret "" }
 		if inside(x,y,1040.0,28.0,208.0,30.0) { ret "checkpoint" }
-		if inside(x,y,984.0,188.0,248.0,30.0) or inside(x,y,28.0,82.0,920.0,492.0) { ret "interact" }
+		if s.CameraIndex<0 and (inside(x,y,984.0,188.0,248.0,30.0) or inside(x,y,28.0,82.0,920.0,492.0)) { ret "interact" }
 		for i=0; i<4; i+=1
 		{
 			left=24.0+float64(i)*310.0
@@ -325,16 +455,23 @@ class View
 			if inside(x,y,left+12.0,661.0,276.0,31.0) { ret format("repair:{}:{}",i,int64((x-left-12.0)/46.0)) }
 			if inside(x,y,left,598.0,302.0,40.0)
 			{
-				e=session.SetLeader(s,i); if e != nil { self.Message=e.str() }; self.Inventory=i; ret ""
+				if button==1 and self.Inventory>=0 and self.Inventory!=i and self.SelectedItem>=0
+				{ item=self.SelectedItem; self.SelectedItem=-1; ret format("transfer:{}:{}",self.Inventory*64+item,i) }
+				e=session.SetLeader(s,i); if e != nil { self.Message=e.str() }; self.Inventory=i; self.Page=0; self.SelectedItem=-1; ret ""
 			}
 			if inside(x,y,left,704.0,302.0,30.0)
-			{ hand:int64=0; if x>left+156.0 { hand=1 }; ret format("hand:{}:{}",i,hand) }
+			{
+				hand:int64=0; if x>left+156.0 { hand=1 }
+				if button==1 and front>=0 and (s.Objects[front]&127)==0x12 and s.Droids[i].Hands[hand]>=0 { ret format("repair-item:{}:{}",i,s.Droids[i].Hands[hand]) }
+				ret format("hand:{}:{}",i,hand)
+			}
 		}
 		if self.Inventory>=0 and inside(x,y,984.0,536.0,116.0,30.0) { if self.Page>0 { self.Page-=1 }; ret "" }
 		if self.Inventory>=0 and inside(x,y,1108.0,536.0,124.0,30.0) { if (self.Page+1)*7<len(s.Droids[self.Inventory].Inventory) { self.Page+=1 }; ret "" }
 		if self.Inventory >= 0 and inside(x,y,984.0,290.0,248.0,238.0)
 		{
 			item=self.Page*7+int64((y-290.0)/34.0); hand:int64=0; if button==1 { hand=1 }
+			if item<len(s.Droids[self.Inventory].Inventory) { self.SelectedItem=item }
 			e=session.Equip(s,self.Inventory,hand,item)
 			if e != nil { self.Message=e.str() } else { self.Message="Equipment assigned." }
 		}

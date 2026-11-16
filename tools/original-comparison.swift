@@ -34,7 +34,6 @@ try extract("Fed7-A.pic","original-wall",0,36,110,88,false)
 try extract("Fed2-A.pic","original-door",62,0,35,69,false)
 try extract("Fed6-B.pic","original-tree",144,84,32,49,true)
 try extract("Fed6-A.pic","original-scavenger",135,118,22,27,true)
-try extract("Fed8.pic","Fed8.pic",0,0,320,200,false)
 // Cross-version comparison exception: the Atari Brains figure is a composite
 // not yet mapped to a supplied Amiga sheet. Keep this derived image ignored.
 let brainsURL=URL(fileURLWithPath:".build/recovery/brains-ref.png")

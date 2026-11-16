@@ -20,6 +20,13 @@ class Application
 	Sounds:[]int64
 	ReplaySnapshot:string
 	ReplayLoads:int64
+	ResetClock:bool
+	fn Feedback(message:string)
+	{
+		at=strings.IndexOf(message," hit for ")
+		if at>=0 and !session.HasEquipment(self.State,"optic",0) { self.View.Message=message[:at]+" hit." }
+		else { self.View.Message=message }
+	}
 	fn Replay(line:string) error
 	{
 		fields=strings.Split(line,"\t")
@@ -39,21 +46,24 @@ class Application
 			self.State=next; self.ReplayLoads+=1; self.View.Window.AudioClear(); self.View.Window.AudioPause(next.Paused); ret nil
 		}
 		if kind!="tick"
-		{ message,e=session.Action(self.State,kind,a,b); if e!=nil { ret e }; self.View.Message=message }
+		{ message,e=session.Action(self.State,kind,a,b); if e!=nil { ret e }; self.Feedback(message) }
 		if kind=="pause" { self.View.Window.AudioPause(self.State.Paused) }
 		for tick=0; tick<ticks; tick+=1 { session.Tick(self.State) }
 		ret nil
 	}
 	fn Sound(event:string)
 	{
-		if len(self.Sounds)!=7 { ret }
+		if len(self.Sounds)!=10 { ret }
 		index:int64=1
 		if event=="door" { index=0 }
 		else if event=="hit" { index=3 }
 		else if event=="damage" or event=="hurt" { index=2 }
 		else if event=="wall" { index=5 }
-		else if event=="sabotage" or event=="escape" { index=6 }
+		else if event=="sabotage" or event=="escape" or event=="explosion" { index=6 }
 		else if event=="pickup" { index=4 }
+		else if event=="spark" { index=7 }
+		else if event=="bounce" or event=="throw" { index=8 }
+		else if event=="charge" or event=="recharge-chest" { index=9 }
 		_ = self.View.Window.PlaySound(self.Sounds[index],0.75)
 	}
 	fn Save(name:string)
@@ -68,7 +78,8 @@ class Application
 		if e != nil { self.View.Message="Load failed: "+e.str(); eprintln(self.View.Message); ret }
 		next,err=session.Decode(payload)
 		if err != nil { self.View.Message="Load failed: "+err.str(); eprintln(self.View.Message); ret }
-		self.State=next; self.View.Window.AudioClear(); self.View.Window.AudioPause(next.Paused)
+		self.State=next; self.View.Inventory=-1; self.View.Page=0; self.View.SelectedItem=-1
+		self.View.Window.AudioClear(); self.View.Window.AudioPause(next.Paused)
 		self.View.Message="Session restored."
 	}
 	fn Action(action:string)
@@ -79,6 +90,20 @@ class Application
 		if action=="pause"
 		{ _,_=session.Action(self.State,"pause",0,0); self.View.Window.AudioPause(self.State.Paused); ret }
 		if action=="" { ret }
+		if action=="interact" and self.State.CameraIndex>=0 { self.View.Message="Return to the party link to interact with the world."; ret }
+		if action=="interact" and !self.State.Paused and !self.State.Probe
+		{
+			front=session.FrontCell(self.State)
+			if front>=0 and (self.State.Objects[front]&127)==0x13
+			{
+				self.View.Window.AudioPause(true)
+				password=host.Prompt("Base computer","Enter the computer password from the clipboard.","")
+				self.View.Window.AudioPause(false); self.ResetClock=true
+				if password=="" { self.View.Message="Computer link closed."; ret }
+				message,e=session.EnterPassword(self.State,password)
+				if e!=nil { self.View.Message=e.str() } else { self.View.Message=message }; ret
+			}
+		}
 		kind=action; a:int64=0; b:int64=0
 		if strings.HasPrefix(action,"hand:")
 		{
@@ -86,12 +111,14 @@ class Application
 			d=self.State.Droids[a]; held=d.Hands[b]
 			if held>=0 and held<len(d.Inventory)
 			{
+				if self.State.CursorCharge>0
+				{ message,e=session.Use(self.State,a,held); if e!=nil { self.View.Message=e.str() } else { self.View.Message=message }; ret }
 				item=d.Inventory[held]
 				if item.Kind=="clue"
 				{ if item.Charge==2 { self.View.Message="RATT: CHAESELUME" } else { self.View.Message=format("Clipboard message {}",item.Charge) }; ret }
 				if item.Kind=="probe" { self.View.Message="Planet probe secured. Sabotage the generators and escape."; ret }
 				if item.Kind=="explosives" { kind="interact" }
-				if item.Kind=="battery" or item.Kind=="device" or item.Kind=="optic" { kind="use"; b=held }
+				if item.Kind=="battery" or item.Kind=="device" or item.Kind=="optic" or item.Kind=="camera" or item.Kind=="ball" or item.Kind=="mine" or item.Kind=="ammo" { kind="use"; b=held }
 			}
 			front=session.FrontCell(self.State)
 			if front>=0 and self.State.FixtureTypes[front]==0
@@ -100,7 +127,7 @@ class Application
 		else if strings.Contains(action,":")
 		{ parts=strings.Split(action,":"); kind=parts[0]; if len(parts)>1 { a=atoi(parts[1]) }; if len(parts)>2 { b=atoi(parts[2]) } }
 		message,e=session.Action(self.State,kind,a,b)
-		if e != nil { self.View.Message=e.str() } else { self.View.Message=message }
+		if e != nil { self.View.Message=e.str() } else { self.Feedback(message) }
 	}
 	fn Key(code:int64)
 	{
@@ -108,7 +135,7 @@ class Application
 		if code==host.KeyF5 { self.Save("quick.captive"); ret }
 		if code==host.KeyF9 { self.Load("quick.captive"); ret }
 		if code>=host.KeyF1 and code<=host.KeyF4
-		{ index=code-host.KeyF1; self.View.Page=0; if self.View.Inventory==index { self.View.Inventory=-1 } else { self.View.Inventory=index }; ret }
+		{ index=code-host.KeyF1; self.View.Page=0; self.View.SelectedItem=-1; if self.View.Inventory==index { self.View.Inventory=-1 } else { self.View.Inventory=index }; ret }
 		kind=""; direction:int64=0
 		if code==host.KeyW { kind="move"; direction=0 }
 		else if code==host.KeyS { kind="move"; direction=2 }
@@ -181,6 +208,9 @@ fn run() error
 	app.View.OriginalScavenger=window.LoadImage(os.PathJoin(assetPath,"original-scavenger.png"))
 	app.View.OriginalBrains=window.LoadImage(os.PathJoin(assetPath,"original-brains.png"))
 	app.View.Wall=window.LoadImage(os.PathJoin(artPath,"wall.png"))
+	app.View.WallSets=[app.View.Wall]
+	for file=["wall-reactor.png","wall-service.png"]
+	{ path=os.PathJoin(artPath,file); if os.Exists(path) { append(app.View.WallSets,window.LoadImage(path)) } }
 	app.View.Door=window.LoadImage(os.PathJoin(artPath,"door.png"))
 	app.View.Tree=window.LoadImage(os.PathJoin(artPath,"tree.png"))
 	app.View.Scavenger=window.LoadImage(os.PathJoin(artPath,"scavenger.png"))
@@ -188,8 +218,10 @@ fn run() error
 	app.View.Generator=window.LoadImage(os.PathJoin(artPath,"generator.png"))
 	app.View.Terminal=window.LoadImage(os.PathJoin(artPath,"terminal.png"))
 	app.View.Droid=window.LoadImage(os.PathJoin(artPath,"droid.png"))
+	for image=[app.View.Wall,app.View.Door,app.View.Tree,app.View.Scavenger,app.View.Brains,app.View.Generator,app.View.Terminal,app.View.Droid,app.View.OriginalWall,app.View.OriginalDoor,app.View.OriginalTree,app.View.OriginalScavenger,app.View.OriginalBrains]
+	{ if image<=0 { ret error("Required artwork is unavailable: "+window.Error()) } }
 	app.Sounds=new([]int64)
-	for id=[19,29,30,32,33,35,38]
+	for id=[19,29,30,32,33,35,38,31,20,37]
 	{ append(app.Sounds,window.LoadSound(os.PathJoin(assetPath,format("audio/effect-{}.wav",id)))) }
 	if !smoke
 	{
@@ -204,7 +236,7 @@ fn run() error
 		replay=strings.SplitLines(strings.Trim(text))
 		if len(replay)<2 or len(replay)>100000 or replay[0]!="kind\ta\tb\tticks" { ret error("replay: invalid transcript") }
 	}
-	start=nano(); previous=start; accumulator:int64=0
+	start=nano(); previous=start; accumulator:int64=0; capturedZones:int64=0
 	for window.Pump()
 	{
 		for
@@ -216,6 +248,7 @@ fn run() error
 			else if kind==6 and !smoke { app.State.Paused=true; window.AudioPause(true) }
 		}
 		current=nano(); elapsed=current-previous; previous=current
+		if app.ResetClock { elapsed=0; app.ResetClock=false }
 		if elapsed<0 { elapsed=0 }; if elapsed>250000000 { elapsed=250000000 }
 		accumulator+=elapsed
 		if replayPath=="" { for accumulator>=16666667 { session.Tick(app.State); accumulator-=16666667 } }
@@ -228,6 +261,9 @@ fn run() error
 		app.View.Draw(app.State)
 		if replayPath!=""
 		{
+			zone=app.State.Y/8; if zone>2 { zone=2 }
+			if (capturedZones&(int64(1)<<zone))==0
+			{ if !window.Capture(os.PathJoin(savePath,format("replay-zone-{}.png",zone))) { ret error(window.Error()) }; capturedZones|=int64(1)<<zone }
 			if strings.HasPrefix(replay[replayAt-1],"save\t") { if !window.Capture(os.PathJoin(savePath,"replay-midway.png")) { ret error(window.Error()) } }
 			if replayAt==len(replay)
 			{
@@ -237,7 +273,12 @@ fn run() error
 				ret nil
 			}
 		}
-		if smoke and current-start>500000000 { _=window.Capture(".build/captive-smoke.png"); smoke=false }
+		if smoke and current-start>500000000
+		{
+			_=window.Capture(".build/captive-smoke.png")
+			app.View.Original=true; app.View.Draw(app.State); _=window.Capture(".build/captive-original-smoke.png"); app.View.Original=false
+			smoke=false
+		}
 		if seconds>0 and current-start>=seconds*1000000000 { break }
 		sleep(16)
 	}

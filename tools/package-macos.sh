@@ -2,9 +2,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 for required in .build/recovery/base0.tsv .build/recovery/mapgen-seed0.txt .build/recovery/base0-fixtures.tsv .build/recovery/base0-traps.tsv .build/recovery/base0-stock.tsv \
-	.build/data/Fed8.pic.ppm .build/data/audio/effect-19.wav \
+	build/extracted/federation build/extracted/Fed7-A.pic build/extracted/Fed2-A.pic \
+	build/extracted/Fed6-A.pic build/extracted/Fed6-B.pic .build/recovery/brains-ref.png \
+	.build/data/audio/effect-19.wav \
 	assets/remaster/wall.png assets/remaster/door.png assets/remaster/tree.png \
-	assets/remaster/scavenger.png assets/remaster/brains.png; do
+	assets/remaster/scavenger.png assets/remaster/brains.png assets/remaster/wall-reactor.png \
+	assets/remaster/wall-service.png assets/remaster/generator.png assets/remaster/terminal.png \
+	assets/remaster/droid.png; do
 	if [[ ! -f "$required" ]]; then
 		printf 'Missing required local asset: %s\n' "$required" >&2
 		exit 1
@@ -16,11 +20,11 @@ app='.build/Captive.app'
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/original/audio" "$app/Contents/Resources/remaster"
 cp .build/captive "$app/Contents/MacOS/captive"
 cp .build/recovery/base0.tsv .build/recovery/mapgen-seed0.txt .build/recovery/base0-fixtures.tsv .build/recovery/base0-traps.tsv .build/recovery/base0-stock.tsv "$app/Contents/Resources/"
-for art in wall door tree scavenger brains generator terminal droid; do
+for art in wall wall-reactor wall-service door tree scavenger brains generator terminal droid; do
 	cp "assets/remaster/$art.png" "$app/Contents/Resources/remaster/"
 done
 cp .build/data/original-*.png "$app/Contents/Resources/original/"
-for id in 19 29 30 32 33 35 38; do
+for id in 19 29 30 32 33 35 38 31 20 37; do
 	cp ".build/data/audio/effect-$id.wav" "$app/Contents/Resources/original/audio/"
 done
 cat > "$app/Contents/Info.plist" <<'PLIST'
