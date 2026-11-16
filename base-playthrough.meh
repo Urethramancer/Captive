@@ -1,0 +1,246 @@
+@inc os
+@inc src/session
+@inc src/persistence
+
+// This acceptance controller dispatches the same actions as the GUI. It reads
+// recovered cells for routing; it never changes party stats, map or inventory.
+class Runner
+{
+	State:session.State
+	Twin:session.State
+	Commands:int64
+	MidpointSaved:bool
+	Transcript:string
+	fn init(state:session.State) { self.State=state; self.Twin=nil; self.Commands=0; self.MidpointSaved=false; self.Transcript="kind\ta\tb\tticks\n" }
+	// Do compares the restored session before consuming presentation sound events.
+	fn Do(kind:string,a:int64,b:int64,ticks:int64) error
+	{
+		message,e=session.Action(self.State,kind,a,b)
+		if e != nil { ret error(format("{} at {},{} facing{}: {}",kind,self.State.X,self.State.Y,self.State.Facing,e.str())) }
+		self.Commands+=1
+		self.Transcript+=format("{}\t{}\t{}\t{}\n",kind,a,b,ticks)
+		if self.Twin != nil
+		{
+			other,failure=session.Action(self.Twin,kind,a,b)
+			if failure != nil or other!=message { ret error("playthrough: restored action diverged") }
+		}
+		for tick=0; tick<ticks; tick+=1
+		{
+			session.Tick(self.State)
+			if self.Twin != nil { session.Tick(self.Twin) }
+		}
+		if self.Twin != nil and session.Encode(self.State)!=session.Encode(self.Twin)
+		{ ret error("playthrough: deterministic continuation diverged") }
+		if kind=="attack" and (self.Twin==nil or (self.Commands>=80 and !self.MidpointSaved)) and self.State.Rng!=0 and self.State.Droids[a].Cooldowns[b]>0
+		{
+			encoded=session.Encode(self.State)
+			failure=persistence.Save(".build/playthrough-midway.save",encoded);if failure!=nil { ret failure }
+			payload,failure=persistence.Load(".build/playthrough-midway.save");if failure!=nil { ret failure }
+			restored,failure=session.Decode(payload);if failure!=nil { ret failure };self.Twin=restored
+			if self.Commands>=80 { self.MidpointSaved=true }
+			if session.Encode(self.Twin)!=encoded { ret error("playthrough: restored snapshot differs") }
+			self.Transcript+="save\t0\t0\t0\nload\t0\t0\t0\n"
+			println("Saved and restored active combat after {} commands",self.Commands)
+		}
+		self.State.SoundEvents=new([]string)
+		if self.Twin!=nil { self.Twin.SoundEvents=new([]string) }
+		ret nil
+	}
+	fn Face(direction:int64) error
+	{
+		for self.State.Facing!=direction
+		{
+			delta:int64=1
+			if (direction-self.State.Facing+4)%4==3 { delta=-1 }
+			e=self.Do("turn",delta,0,2); if e != nil { ret e }
+		}
+		ret nil
+	}
+	fn Fight(x:int64,y:int64) error
+	{
+		for rounds=0; rounds<500; rounds+=1
+		{
+			if session.EnemyAt(self.State,x,y)<0 { ret nil }
+			attacked=false
+			for slot=0; slot<4; slot+=1
+			{
+				droid=self.State.Formation[slot]; d=self.State.Droids[droid]
+				for hand=0; hand<2; hand+=1
+				{
+					if session.EnemyAt(self.State,x,y)<0 { break }
+					if !session.Alive(d) or d.Energy<=0 or d.Cooldowns[hand]>0 or d.Parts[hand+2]==0 { continue }
+					item=d.Hands[hand]
+					if item>=0
+					{
+						weapon=d.Inventory[item]
+						if weapon.Kind!="zlot-1.9" and weapon.Kind!="weapon" { continue }
+						if weapon.Quantity==0 or weapon.Condition==0 { continue }
+						if slot>=2 and (weapon.Kind=="weapon" or weapon.Kind=="zlot-1.9") { continue }
+					}
+					else if slot>=2 { continue }
+					e=self.Do("attack",droid,hand,0); if e!=nil { ret e }; attacked=true
+				}
+			}
+			if !attacked { e=self.Advance(18);if e!=nil { ret e };continue }
+			e=self.Advance(18); if e!=nil { ret e }
+		}
+		ret error("playthrough: combat bound exceeded")
+	}
+
+	fn Advance(ticks:int64) error
+	{
+		self.Transcript+=format("tick\t0\t0\t{}\n",ticks)
+		for i=0;i<ticks;i+=1 { session.Tick(self.State); if self.Twin!=nil { session.Tick(self.Twin) } }
+		if self.Twin!=nil and session.Encode(self.State)!=session.Encode(self.Twin) { ret error("playthrough: restored ticks diverged") }
+		self.State.SoundEvents=new([]string)
+		if self.Twin!=nil { self.Twin.SoundEvents=new([]string) }
+		ret nil
+	}
+}
+
+// planStep finds a bounded route through original cells and operable obstacles.
+fn planStep(s:session.State,targetX:int64,targetY:int64) int64,error
+{
+	previous=new([]int64); queue=new([]int64)
+	for at=0;at<s.Width*s.Height;at+=1 { append(previous,-1) }
+	start=s.Y*s.Width+s.X; goal=targetY*s.Width+targetX
+	append(queue,start); previous[start]=start
+	dx:[]int64=[0,1,0,-1];dy:[]int64=[-1,0,1,0]
+	for head=0;head<len(queue);head+=1
+	{
+		cell=queue[head]; if cell==goal { break }
+		for direction=0;direction<4;direction+=1
+		{
+			x=cell%s.Width+dx[direction];y=cell/s.Width+dy[direction]
+			if x<0 or x>=s.Width or y<0 or y>=s.Height { continue }
+			next=y*s.Width+x; object=s.Objects[next]&127
+			if previous[next]>=0 or (s.Tiles[next]==0 and object!=0x21) { continue }
+			if object==0x0e
+			{
+				bx=x+dx[direction];by=y+dy[direction]
+				if bx<0 or bx>=s.Width or by<0 or by>=s.Height { continue }
+				behind=by*s.Width+bx
+				if !session.Walkable(s,bx,by) and (s.Objects[behind]&127)!=0x21 { continue }
+			}
+			previous[next]=cell;append(queue,next)
+		}
+	}
+	if previous[goal]<0 { ret -1,error(format("playthrough: no route from {},{} to {},{}",s.X,s.Y,targetX,targetY)) }
+	next=goal
+	for previous[next]!=start
+	{
+		if next==start { ret -1,nil }
+		next=previous[next]
+	}
+	for direction=0;direction<4;direction+=1
+	{ if start%s.Width+dx[direction]==next%s.Width and start/s.Width+dy[direction]==next/s.Width { ret direction,nil } }
+	ret -1,error("playthrough: invalid route")
+}
+fn recharge(r:Runner) error
+{
+	low=false
+	for d=r.State.Droids { if d.Energy<70 { low=true } }
+	if !low or r.State.Sabotaged { ret nil }
+	dx:[]int64=[0,1,0,-1];dy:[]int64=[-1,0,1,0]
+	for side=0;side<4;side+=1
+	{
+		sx=r.State.X+dx[side];sy=r.State.Y+dy[side]
+		if sx<0 or sx>=r.State.Width or sy<0 or sy>=r.State.Height { continue }
+		if r.State.FixtureTypes[sy*r.State.Width+sx]!=0 { continue }
+		e=r.Face(side);if e!=nil { ret e }
+		for droid=0;droid<4;droid+=1
+		{
+			if r.State.Droids[droid].Energy>=100 { continue }
+			e=r.Do("recharge-chest",droid,0,2);if e!=nil { ret e }
+		}
+		ret nil
+	}
+	ret nil
+}
+fn travel(r:Runner,x:int64,y:int64) error
+{
+	for count=0;count<2000;count+=1
+	{
+		if r.State.X==x and r.State.Y==y { ret nil }
+		direction,e=planStep(r.State,x,y);if e!=nil { ret e }
+		e=r.Face(direction);if e!=nil { ret e }
+		front=session.FrontCell(r.State);object=r.State.Objects[front]&127
+		if object==0x0e or (object==0x15 and r.State.DoorOpen[front]==0)
+		{ e=r.Do("interact",0,0,2);if e!=nil { ret error(format("at {},{} facing{}: {}",r.State.X,r.State.Y,r.State.Facing,e.str())) } }
+		front=session.FrontCell(r.State)
+		if (r.State.Objects[front]&127)==0x21
+		{ e=r.Do("attack",0,1,18);if e!=nil { ret e } }
+		e=r.Fight(front%r.State.Width,front/r.State.Width);if e!=nil { ret e }
+		e=r.Do("move",0,0,4);if e!=nil { ret e }
+		e=recharge(r);if e!=nil { ret e }
+	}
+	ret error("playthrough: movement bound exceeded")
+}
+fn play(r:Runner) error
+{
+	e=r.Do("collect",0,0,0);if e!=nil { ret e }
+	e=travel(r,26,0);if e!=nil { ret e }
+	e=r.Face(2);if e!=nil { ret e }
+	e=r.Do("interact",0,0,0);if e!=nil { ret e }
+	e=r.Do("equip-left",0,2,0);if e!=nil { ret e }
+	e=travel(r,19,2);if e!=nil { ret e }
+	e=r.Do("collect",0,0,0);if e!=nil { ret e }
+	e=r.Face(3);if e!=nil { ret e }
+	e=r.Do("interact",0,0,0);if e!=nil { ret e }
+	println("Probe recovered after {} actions, {} ticks",r.Commands,r.State.Ticks)
+	e=travel(r,23,2);if e!=nil { ret e }
+	e=r.Face(1);if e!=nil { ret e }
+	e=r.Do("interact",0,0,0);if e!=nil { ret e }
+	e=r.Do("sell",0,3,0);if e!=nil { ret e }
+	for droid=0;droid<4;droid+=1
+	{
+		for part=0;part<6;part+=1
+		{
+			if r.State.Droids[droid].Parts[part]>=100 { continue }
+			e=r.Do("repair",droid,part,0);if e!=nil { ret e }
+		}
+	}
+	row:int64=-1
+	for index=0;index<len(r.State.Offers);index+=1
+	{
+		offer=r.State.Offers[index]
+		if offer.X==24 and offer.Y==2 and offer.Code==31 and offer.Quality==0 { row=index;break }
+	}
+	if row<0 { ret error("playthrough: recovered shop lacks basic knuckle-duster") }
+	e=r.Do("buy",1,row,0);if e!=nil { ret e }
+	if r.State.Droids[1].Skills[0]>=9 { e=r.Do("equip-left",1,0,0);if e!=nil { ret e } }
+	e=r.Do("pause",0,0,0);if e!=nil { ret e }
+	frozen=session.Encode(r.State)
+	e=r.Advance(120);if e!=nil { ret e }
+	if session.Encode(r.State)!=frozen { ret error("playthrough: pause changed simulation") }
+	e=r.Do("pause",0,0,0);if e!=nil { ret e }
+	e=travel(r,20,8);if e!=nil { ret e }
+	e=r.Face(2);if e!=nil { ret e }
+	e=r.Do("equip-right",0,1,0);if e!=nil { ret e }
+	e=r.Do("interact",0,0,0);if e!=nil { ret e }
+	e=r.Do("equip-right",0,-1,0);if e!=nil { ret e }
+	if !r.State.Sabotaged { ret error("playthrough: generator interaction did not sabotage") }
+	e=travel(r,30,1);if e!=nil { ret e }
+	e=r.Face(0);if e!=nil { ret e }
+	e=r.Do("interact",0,0,0);if e!=nil { ret e }
+	if !r.State.Escaped or !r.State.Probe or !r.State.Sabotaged { ret error("playthrough: base objectives incomplete") }
+	if !r.MidpointSaved or r.Twin==nil { ret error("playthrough: midway disk continuation was not verified") }
+	ret os.Writefile(".build/base-playthrough.tsv",r.Transcript)
+}
+fn main()
+{
+	text,e=os.Readfile(".build/recovery/base0.tsv"); if e!=nil { eprintln(e.str()); exit(1) }
+	s,e=session.LoadBase(text); if e!=nil { eprintln(e.str()); exit(1) }
+	report,e=os.Readfile(".build/recovery/mapgen-seed0.txt"); if e!=nil { eprintln(e.str()); exit(1) }
+	e=session.Populate(s,report); if e!=nil { eprintln(e.str()); exit(1) }
+	fixtures,e=os.Readfile(".build/recovery/base0-fixtures.tsv");if e!=nil { eprintln(e.str()); exit(1) }
+	e=session.LoadFixtures(s,fixtures);if e!=nil { eprintln(e.str()); exit(1) }
+	traps,e=os.Readfile(".build/recovery/base0-traps.tsv");if e!=nil { eprintln(e.str()); exit(1) }
+	e=session.LoadTraps(s,traps);if e!=nil { eprintln(e.str()); exit(1) }
+	stock,e=os.Readfile(".build/recovery/base0-stock.tsv");if e!=nil { eprintln(e.str()); exit(1) }
+	e=session.LoadStock(s,stock);if e!=nil { eprintln(e.str()); exit(1) }
+	e=session.InitialiseParty(s,["Rook","Bishop","Knight","Pawn"]); if e!=nil { eprintln(e.str()); exit(1) }
+	r=new Runner(s)
+	e=play(r);if e!=nil { os.Writefile(".build/base-playthrough-failed.tsv",r.Transcript); eprintln(e.str()); exit(1) }
+	println("Escaped through {} actions and {} ticks with deterministic continuation",r.Commands,r.State.Ticks)
+}
