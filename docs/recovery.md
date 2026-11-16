@@ -122,3 +122,13 @@ Main routine `21b6` gates stock by availability group, current seed and shop num
 Main routine `1f50` constructs a deterministic quality mask. For ordinary stock, start with `rol16(material,4)`, add the item index, its first table word and shop number, rotate left by four, add the seed, apply `n=(n*1509+41)&ffff`, then use `(ror16(n,3)^0800)&ff`, replacing a zero mask with `80`. Basic corresponds to bit seven and Super to bit zero. The separate armour/material branch is irrelevant to seed zero's unavailable armour stock.
 
 Routine `1f90` computes quality-priced stock as `basePrice + increment*(material*32+quality)` when flags bit zero is set. Flags bit five adds the seed-dependent increment (capped at 32768 for that contribution), as for explosives. Selling and repair apply additional condition and stock-dependent adjustments in `2016`, `2036` and their callers; displaying the base price as an exact sell or repair offer would be wrong.
+
+`tools/main-export` now reproduces seed-zero shop offers from the supplied decoded main executable and numbered shop registry:
+
+```sh
+go run tools/main-export/main.go build/extracted/federation \
+  .build/recovery/base0-shops.tsv .build/recovery/base0-stock.tsv
+go test tools/main-export/main.go tools/main-export/main_test.go
+```
+
+It checks the Amiga hunk descriptor, declared code bounds and exact supplied-main SHA-256 (`8545561236cf6e0f773cd1ae886be13cc9bedf51c53595c28c3b2e259c4dabbc`) before using revision-specific offsets. The ignored TSV contains 180 offers: raw item identifier, kind, category, quality, price, original item data and flags, together with the numbered shop's position. Shop two offers Knuckle-Duster qualities 0,1,2,3,5,7 and Battle-Glove qualities 0,2,6,7. The respective Basic prices are 49 and 99. Exporter tests cover descriptor bounds, unsupported checksums, stock gates, quality-mask vectors and invalid shop registries.
