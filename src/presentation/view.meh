@@ -1,0 +1,343 @@
+@mod presentation
+@inc src/host
+@inc src/session
+
+const ink:uint32 = 0xd8ddcaff
+const muted:uint32 = 0x99aaa6ff
+const amber:uint32 = 0xe4ae58ff
+
+fn shade(value:int64) uint32
+{
+	v = value; if v < 0 { v = 0 }; if v > 255 { v = 255 }
+	ret uint32((v << 24) | ((v+5) << 16) | ((v+3) << 8) | 255)
+}
+fn absolute(v:float64) float64 { if v < 0.0 { ret -v }; ret v }
+fn inside(x:float64, y:float64, left:float64, top:float64, width:float64, height:float64) bool
+{ ret x >= left and y >= top and x < left+width and y < top+height }
+
+// View owns presentation state only; all game actions go through session.
+class View
+{
+	Window:host.Window
+	Inventory:int64
+	Page:int64
+	StockPage:int64
+	Offers:[]int64
+	Message:string
+	Original:bool
+	OriginalWall:int64
+	OriginalDoor:int64
+	OriginalTree:int64
+	OriginalScavenger:int64
+	OriginalBrains:int64
+	Wall:int64
+	Door:int64
+	Generator:int64
+	Terminal:int64
+	Droid:int64
+	Tree:int64
+	Scavenger:int64
+	Brains:int64
+	Depth:[]float64
+	Rays:int64
+	RayWidth:float64
+	fn init(window:host.Window)
+	{
+		self.Window = window; self.Inventory = -1
+		self.Message = "Recover the probe. Disable the generators. Return to the entrance."
+		self.Depth = new([]float64)
+		self.Rays=460; self.RayWidth=2.0
+	}
+	fn Button(label:string, x:float64, y:float64, width:float64)
+	{
+		self.Window.Rect(x,y,width,30.0,uint32(0x34403dff))
+		self.Window.Rect(x,y,width,2.0,uint32(0x70817aff))
+		self.Window.Text(label,x+8.0,y+7.0,13.0,ink)
+	}
+	fn blocked(s:session.State, x:int64, y:int64) bool
+	{ ret !session.Walkable(s,x,y) }
+	fn Corridor(s:session.State)
+	{
+		w = self.Window
+		w.Rect(24.0,78.0,928.0,500.0,uint32(0x030707ff))
+		w.Rect(28.0,82.0,920.0,246.0,uint32(0x161d1bff))
+		w.Rect(28.0,328.0,920.0,246.0,uint32(0x30312aff))
+		dx:[]float64 = [0.0,1.0,0.0,-1.0]; dy:[]float64 = [-1.0,0.0,1.0,0.0]
+		forwardX = dx[s.Facing]; forwardY = dy[s.Facing]
+		self.Depth = new([]float64)
+		self.Rays=460; if self.Original { self.Rays=230 }; self.RayWidth=920.0/float64(self.Rays)
+		for column = 0; column < self.Rays; column += 1
+		{
+			camera = (float64(column)+0.5)/(float64(self.Rays)*0.5)-1.0
+			rayX = forwardX - forwardY*camera*0.66
+			rayY = forwardY + forwardX*camera*0.66
+			deltaX = 1000000.0; deltaY = 1000000.0
+			if absolute(rayX) > 0.000001 { deltaX = absolute(1.0/rayX) }
+			if absolute(rayY) > 0.000001 { deltaY = absolute(1.0/rayY) }
+			x = s.X; y = s.Y; stepX:int64 = 1; stepY:int64 = 1
+			if rayX < 0.0 { stepX = -1 }; if rayY < 0.0 { stepY = -1 }
+			distX = deltaX*0.5; distY = deltaY*0.5; distance = 0.5; side:int64 = 0
+			for step = 0; step < 128; step += 1
+			{
+				if distX < distY { distance=distX; distX+=deltaX; x+=stepX; side=0 }
+				else { distance=distY; distY+=deltaY; y+=stepY; side=1 }
+				if self.blocked(s,x,y) { break }
+			}
+			if distance < 0.1 { distance = 0.1 }
+			append(self.Depth,distance)
+			fullHeight = 460.0/distance; height=fullHeight
+			if height > 492.0 { height = 492.0 }
+			top = 328.0-height*0.5
+			light = int64(100.0/(1.0+distance*0.18)); if side == 1 { light-=15 }
+			w.Rect(28.0+float64(column)*self.RayWidth,top,self.RayWidth+0.1,height,shade(light))
+			// Panel seams follow world coordinates, keeping quarter turns aligned.
+			coordinate = float64(s.X)+0.5+distance*rayX
+			if side == 0 { coordinate = float64(s.Y)+0.5+distance*rayY }
+			fraction = coordinate-float64(int64(coordinate))
+			texture=self.Wall
+			if self.Original and self.OriginalWall>0 { texture=self.OriginalWall }
+			if x>=0 and y>=0 and x<s.Width and y<s.Height and (s.Objects[y*s.Width+x]&127)==0x15 { texture=self.Door }
+			if self.Original and x>=0 and y>=0 and x<s.Width and y<s.Height and (s.Objects[y*s.Width+x]&127)==0x15 and self.OriginalDoor>0 { texture=self.OriginalDoor }
+			if texture>0
+			{
+				u=fraction; if u<0.0 { u+=1.0 }; if u>0.995 { u=0.995 }
+				w.ImageCrop(texture,u,(fullHeight-height)/(2.0*fullHeight),0.005,height/fullHeight,28.0+float64(column)*self.RayWidth,top,self.RayWidth+0.1,height)
+				alpha=int64(distance*15.0); if side==1 { alpha+=35 }; if alpha>190 { alpha=190 }
+				w.Rect(28.0+float64(column)*self.RayWidth,top,self.RayWidth+0.1,height,uint32(alpha))
+			}
+			if fraction < 0.025 or fraction > 0.975
+			{ w.Rect(28.0+float64(column)*self.RayWidth,top,self.RayWidth+0.1,height,shade(light-30)) }
+			w.Rect(28.0+float64(column)*self.RayWidth,top+height*0.70,self.RayWidth+0.1,2.0,shade(light-24))
+			w.Rect(28.0+float64(column)*self.RayWidth,top,self.RayWidth+0.1,2.0,shade(light+25))
+		}
+		self.Entities(s,forwardX,forwardY)
+		w.Rect(28.0,552.0,920.0,22.0,uint32(0x0d171bdc))
+		w.Text("W / S  advance / retreat     A / D  strafe     Q / E  quarter turn",44.0,556.0,13.0,ink)
+		if self.Original { w.Text("ORIGINAL ART / REMASTER RENDERER",44.0,92.0,12.0,ink) }
+	}
+	fn Billboard(image:int64, label:string, distance:float64, lateral:float64)
+	{
+		if distance<0.15 or distance>16.0 { ret }
+		centre=488.0+lateral/distance*696.0
+		size=430.0/distance; left=centre-size*0.5; top=328.0-size*0.5
+		first=int64((left-28.0)/self.RayWidth); last=int64((left+size-28.0)/self.RayWidth)
+		if first<0 { first=0 }; if last>=self.Rays { last=self.Rays-1 }
+		visible=false
+		for column=first; column<=last; column+=1
+		{
+			if distance>=self.Depth[column] { continue }
+			x=28.0+float64(column)*self.RayWidth; u=(x-left)/size
+			if u<0.0 or u>=0.995 { continue }
+			visibleHeight=size; visibleTop=top
+			if visibleTop<82.0 { visibleTop=82.0 }; if top+visibleHeight>574.0 { visibleHeight=574.0-top }
+			if visibleHeight-(visibleTop-top)<=0.0 { continue }
+			visible=true
+			if image>0 { self.Window.ImageCrop(image,u,(visibleTop-top)/size,self.RayWidth/size,(visibleHeight-(visibleTop-top))/size,x,visibleTop,self.RayWidth+0.1,visibleHeight-(visibleTop-top)) }
+			else { self.Window.Rect(x,visibleTop,self.RayWidth+0.1,visibleHeight-(visibleTop-top),uint32(0x9c6d43ff)) }
+		}
+		if visible and centre>70.0 and centre<900.0 and distance<4.0 and top>104.0 { self.Window.Text(label,centre-44.0,top-22.0,14.0,amber) }
+	}
+	fn Entities(s:session.State, forwardX:float64, forwardY:float64)
+	{
+		// Far-to-near billboards, with each strip checked against the same wall depth.
+		for pass=16; pass>=0; pass-=1
+		{
+			for enemy=s.Enemies
+			{
+				alive:int64=0; for health=enemy.Health { if health>0 { alive+=1 } }
+				if alive==0 { continue }
+				rx=float64(enemy.X-s.X); ry=float64(enemy.Y-s.Y)
+				distance=rx*forwardX+ry*forwardY; if int64(distance)!=pass { continue }
+				lateral=-rx*forwardY+ry*forwardX
+				image=self.Scavenger; if enemy.Kind=="Tree" { image=self.Tree }; if enemy.Kind=="Brains" { image=self.Brains }
+				if self.Original and enemy.Kind=="Tree" and self.OriginalTree>0 { image=self.OriginalTree }
+				if self.Original and enemy.Kind=="GollyWog" and self.OriginalScavenger>0 { image=self.OriginalScavenger }
+				if self.Original and enemy.Kind=="Brains" and self.OriginalBrains>0 { image=self.OriginalBrains }
+				self.Billboard(image,format("{} ×{}",enemy.Kind,alive),distance,lateral)
+			}
+			for cell=0; cell<len(s.Objects); cell+=1
+			{
+				kind=s.Objects[cell]&127
+				if kind!=9 and kind!=0x12 and kind!=0x13 { continue }
+				rx=float64(cell%s.Width-s.X); ry=float64(cell/s.Width-s.Y)
+				distance=rx*forwardX+ry*forwardY
+				if int64(distance)!=pass { continue }
+				lateral=-rx*forwardY+ry*forwardX
+				image=self.Terminal; label="COMPUTER"
+				if kind==9 { image=self.Generator; label="GENERATOR"; distance-=0.51 }
+				if kind==0x12 { label="SHOP" }
+				self.Billboard(image,label,distance,lateral)
+			}
+		}
+	}
+	fn DroidPanel(s:session.State, index:int64)
+	{
+		w=self.Window; d=s.Droids[index]; x=24.0+float64(index)*310.0
+		colours:[]uint32=[0xd86c63ff,0x8db784ff,0xd6b663ff,0x7c9cc4ff]
+		w.Rect(x,598.0,302.0,162.0,uint32(0x252f2dff))
+		w.Rect(x,598.0,302.0,4.0,colours[index])
+		name=d.Name; if len(name)>12 { name=name[:12]+"…" }; if s.Leader == index { name="◆ "+name }
+		if self.Droid>0 { w.Image(self.Droid,x+8.0,607.0,52.0,52.0) }
+		w.Text(name,x+68.0,611.0,17.0,ink)
+		position="REAR"; if s.Formation[0] == index or s.Formation[1] == index { position="FRONT" }
+		w.Text(position,x+232.0,614.0,12.0,muted)
+		w.Text(format("{}%",d.Energy),x+72.0,641.0,13.0,muted)
+		w.Rect(x+122.0,643.0,164.0,9.0,uint32(0x101a18ff))
+		w.Rect(x+122.0,643.0,float64(d.Energy)*1.64,9.0,colours[index])
+		for part=0; part<6; part+=1
+		{
+			px=x+12.0+float64(part)*46.0
+			w.Rect(px,665.0,40.0,8.0,uint32(0x101a18ff))
+			w.Rect(px,665.0,float64(d.Parts[part])*0.4,8.0,colours[index])
+		}
+		w.Text("HEAD  BODY   L-ARM R-ARM  L-LEG R-LEG",x+12.0,679.0,10.0,muted)
+		for hand=0; hand<2; hand+=1
+		{
+			label="BARE HAND"; item=d.Hands[hand]
+			if item >= 0 and item < len(d.Inventory) { label=d.Inventory[item].Kind }
+			self.Button(label,x+10.0+float64(hand)*146.0,704.0,138.0)
+		}
+		w.Text(format("F{} inventory   ·   click name to lead",index+1),x+12.0,742.0,11.0,muted)
+	}
+	fn Draw(s:session.State)
+	{
+		w=self.Window; w.Begin(uint32(0x151d1bff))
+		w.Rect(8.0,8.0,1264.0,764.0,uint32(0x4a4b3dff))
+		w.Rect(16.0,16.0,1248.0,748.0,uint32(0x182220ff))
+		w.Text("CAPTIVE",28.0,27.0,30.0,ink)
+		w.Text("REMOTE DROID LINK / FIRST BASE",203.0,37.0,13.0,muted)
+		self.Button("SAVE",612.0,28.0,68.0); self.Button("LOAD",688.0,28.0,68.0)
+		self.Button("PAUSE",764.0,28.0,76.0); self.Button("ART",848.0,28.0,64.0)
+		self.Button("FULLSCREEN",920.0,28.0,112.0); self.Button("CHECKPOINT",1040.0,28.0,208.0)
+		self.Corridor(s)
+		w.Rect(968.0,78.0,280.0,500.0,uint32(0x101b19ff))
+		w.Text("OPERATIONS",984.0,96.0,18.0,amber)
+		w.Text(format("CREDITS   {}",s.Credits),984.0,126.0,15.0,ink)
+		probe="PROBE   NOT RECOVERED"; if s.Probe { probe="PROBE   SECURED" }
+		w.Text(probe,984.0,154.0,13.0,muted)
+		if s.Sabotaged { w.Text(format("CORE  {} seconds",s.SabotageTicks/60),984.0,172.0,12.0,amber) }
+		front=session.FrontCell(s); shop=front>=0 and (s.Objects[front]&127)==0x12
+		if shop { self.Button("STOCK",984.0,188.0,116.0); self.Button("SELL HELD",1108.0,188.0,124.0) }
+		else { self.Button("INTERACT  /  SPACE",984.0,188.0,248.0) }
+		if self.Inventory >= 0
+		{
+			d=s.Droids[self.Inventory]
+			w.Text(format("{} / INVENTORY",d.Name),984.0,238.0,15.0,amber)
+			w.Text(format("COMBAT SKILL  {}  (provisional)",d.Skills[0]),984.0,264.0,12.0,muted)
+			for row=0; row<7; row+=1
+			{
+				i=self.Page*7+row; if i>=len(d.Inventory) { break }
+				item=d.Inventory[i]; yy=290.0+float64(row)*34.0
+				self.Button(format("{}  {}%  ×{}",item.Kind,item.Condition,item.Quantity),984.0,yy,248.0)
+			}
+			if len(d.Inventory)==0 { w.Text("No carried equipment",984.0,294.0,14.0,muted) }
+			self.Button("PREVIOUS",984.0,536.0,116.0); self.Button("NEXT",1108.0,536.0,124.0)
+		}
+		else if shop
+		{
+			self.Offers=new([]int64)
+			for i=0; i<len(s.Offers); i+=1 { offer=s.Offers[i]; if offer.X==front%s.Width and offer.Y==front/s.Width { append(self.Offers,i) } }
+			w.Text(format("STOCK / {}",s.Droids[s.Leader].Name),984.0,238.0,15.0,amber)
+			w.Text("Click an available item to buy.",984.0,264.0,12.0,muted)
+			for row=0; row<7; row+=1
+			{
+				at=self.StockPage*7+row; if at>=len(self.Offers) { break }
+				o=s.Offers[self.Offers[at]]; label=o.Name; if len(label)>15 { label=label[:15] }
+				label=format("{}  {}g",label,o.Price); yy=290.0+float64(row)*34.0
+				self.Button(label,984.0,yy,248.0)
+				if !session.SupportedOffer(o) { w.Rect(984.0,yy,248.0,30.0,uint32(0x101b19ba)); w.Text("UNAVAILABLE",992.0,yy+7.0,12.0,muted) }
+			}
+			self.Button("PREVIOUS",984.0,536.0,116.0); self.Button("NEXT",1108.0,536.0,124.0)
+		}
+		else
+		{
+			w.Text("LINK ESTABLISHED",984.0,244.0,17.0,ink)
+			w.Text("Four droids. One way out.",984.0,279.0,14.0,muted)
+			w.Text("Click a hand to use its equipment.",984.0,315.0,12.0,muted)
+			w.Text("F1–F4 inspect each droid.",984.0,344.0,13.0,muted)
+			w.Text("F5 quicksave  ·  F9 quickload",984.0,373.0,13.0,muted)
+			w.Text("Escape pauses the simulation.",984.0,402.0,12.0,muted)
+		}
+		for droid=0; droid<4; droid+=1 { self.DroidPanel(s,droid) }
+		w.Text(self.Message,28.0,776.0,13.0,ink)
+		mx=w.MouseX(); my=w.MouseY(); hint=""
+		if inside(mx,my,984.0,290.0,248.0,238.0) and self.Inventory>=0
+		{
+			i=self.Page*7+int64((my-290.0)/34.0); d=s.Droids[self.Inventory]
+			if i<len(d.Inventory) { item=d.Inventory[i]; hint=format("{}: condition{}%, ammunition{}, charge{}. Click left / right button to equip.",item.Kind,item.Condition,item.Ammunition,item.Charge) }
+		}
+		for i=0; i<4; i+=1
+		{
+			left=24.0+float64(i)*310.0
+			if inside(mx,my,left+68.0,608.0,152.0,28.0) { hint=s.Droids[i].Name+" · Click to select this droid as leader." }
+			if inside(mx,my,left+220.0,608.0,82.0,28.0) { hint="Click FRONT/REAR to swap with the other row; right-click swaps left/right." }
+			if inside(mx,my,left,661.0,302.0,31.0) { hint="Body condition: head, chest, left/right arms, left/right legs. Click a part facing a shop to repair." }
+		}
+		if hint!="" { w.Rect(20.0,764.0,1240.0,32.0,uint32(0x0a1715ff)); w.Text(hint,28.0,774.0,12.0,ink) }
+		if s.Paused
+		{
+			w.Rect(216.0,234.0,544.0,156.0,uint32(0x061412ef))
+			w.Text("LINK SUSPENDED",316.0,258.0,30.0,ink)
+			w.Text("Escape resumes · saves remain available",278.0,313.0,16.0,muted)
+		}
+		if s.Escaped
+		{
+			w.Rect(184.0,220.0,608.0,174.0,uint32(0x071815ef))
+			w.Text("FIRST BASE COMPLETE",274.0,250.0,28.0,amber)
+			w.Text("Probe recovered. Generators destroyed.",280.0,300.0,16.0,ink)
+			w.Text("All surviving droids escaped.",316.0,332.0,16.0,muted)
+		}
+		w.Submit()
+	}
+	// Click returns an action for the application boundary to dispatch.
+	fn Click(s:session.State, x:float64, y:float64, button:int64) string
+	{
+		front=session.FrontCell(s)
+		if front>=0 and (s.Objects[front]&127)==0x12
+		{
+			if inside(x,y,984.0,188.0,116.0,30.0) { self.Inventory=-1; ret "" }
+			if self.Inventory<0
+			{
+				if inside(x,y,984.0,536.0,116.0,30.0) { if self.StockPage>0 { self.StockPage-=1 }; ret "" }
+				if inside(x,y,1108.0,536.0,124.0,30.0) { if (self.StockPage+1)*7<len(self.Offers) { self.StockPage+=1 }; ret "" }
+				if inside(x,y,984.0,290.0,248.0,238.0)
+				{ at=self.StockPage*7+int64((y-290.0)/34.0); if at<len(self.Offers) { ret format("buy:{}:{}",s.Leader,self.Offers[at]) }; ret "" }
+			}
+		}
+		if front>=0 and (s.Objects[front]&127)==0x12 and inside(x,y,1108.0,188.0,124.0,30.0)
+		{ droid=s.Leader; if self.Inventory>=0 { droid=self.Inventory }; ret format("sell:{}:{}",droid,s.Droids[droid].Hands[0]) }
+		if inside(x,y,612.0,28.0,68.0,30.0) { ret "save" }
+		if inside(x,y,688.0,28.0,68.0,30.0) { ret "load" }
+		if inside(x,y,764.0,28.0,76.0,30.0) { ret "pause" }
+		if inside(x,y,848.0,28.0,64.0,30.0) { self.Original=!self.Original; ret "" }
+		if inside(x,y,920.0,28.0,112.0,30.0) { self.Window.Fullscreen(); ret "" }
+		if inside(x,y,1040.0,28.0,208.0,30.0) { ret "checkpoint" }
+		if inside(x,y,984.0,188.0,248.0,30.0) or inside(x,y,28.0,82.0,920.0,492.0) { ret "interact" }
+		for i=0; i<4; i+=1
+		{
+			left=24.0+float64(i)*310.0
+			if inside(x,y,left+220.0,608.0,82.0,28.0)
+			{
+				position:int64=0; for at=0; at<4; at+=1 { if s.Formation[at]==i { position=at } }
+				other=position^2; if button==1 { other=position^1 }
+				ret format("formation:{}:{}",position,other)
+			}
+			if inside(x,y,left+12.0,661.0,276.0,31.0) { ret format("repair:{}:{}",i,int64((x-left-12.0)/46.0)) }
+			if inside(x,y,left,598.0,302.0,40.0)
+			{
+				e=session.SetLeader(s,i); if e != nil { self.Message=e.str() }; self.Inventory=i; ret ""
+			}
+			if inside(x,y,left,704.0,302.0,30.0)
+			{ hand:int64=0; if x>left+156.0 { hand=1 }; ret format("hand:{}:{}",i,hand) }
+		}
+		if self.Inventory>=0 and inside(x,y,984.0,536.0,116.0,30.0) { if self.Page>0 { self.Page-=1 }; ret "" }
+		if self.Inventory>=0 and inside(x,y,1108.0,536.0,124.0,30.0) { if (self.Page+1)*7<len(s.Droids[self.Inventory].Inventory) { self.Page+=1 }; ret "" }
+		if self.Inventory >= 0 and inside(x,y,984.0,290.0,248.0,238.0)
+		{
+			item=self.Page*7+int64((y-290.0)/34.0); hand:int64=0; if button==1 { hand=1 }
+			e=session.Equip(s,self.Inventory,hand,item)
+			if e != nil { self.Message=e.str() } else { self.Message="Equipment assigned." }
+		}
+		ret ""
+	}
+}

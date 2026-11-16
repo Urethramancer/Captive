@@ -1,0 +1,249 @@
+@inc os
+@inc strings
+@inc src/host
+@inc src/session
+@inc src/persistence
+@inc src/presentation
+
+fn validName(name:string) bool
+{
+	if len(name)<1 or len(name)>19 { ret false }
+	for ch=strbytes(name) { if !((ch>=48 and ch<=57) or (ch>=65 and ch<=90) or (ch>=97 and ch<=122)) { ret false } }
+	ret true
+}
+
+class Application
+{
+	State:session.State
+	View:presentation.View
+	SaveDirectory:string
+	Sounds:[]int64
+	ReplaySnapshot:string
+	ReplayLoads:int64
+	fn Replay(line:string) error
+	{
+		fields=strings.Split(line,"\t")
+		if len(fields)!=4 { ret error("replay: expected four fields") }
+		a=atoi(fields[1]); b=atoi(fields[2]); ticks=atoi(fields[3]); kind=fields[0]
+		if ticks<0 or ticks>36000 { ret error("replay: tick count outside bounds") }
+		if kind=="save"
+		{
+			self.ReplaySnapshot=session.Encode(self.State)
+			ret persistence.Save(os.PathJoin(self.SaveDirectory,"replay-midway.captive"),self.ReplaySnapshot)
+		}
+		if kind=="load"
+		{
+			payload,e=persistence.Load(os.PathJoin(self.SaveDirectory,"replay-midway.captive")); if e!=nil { ret e }
+			next,e=session.Decode(payload); if e!=nil { ret e }
+			if payload!=self.ReplaySnapshot or session.Encode(next)!=self.ReplaySnapshot { ret error("replay: continuation changed across save/load") }
+			self.State=next; self.ReplayLoads+=1; self.View.Window.AudioClear(); self.View.Window.AudioPause(next.Paused); ret nil
+		}
+		if kind!="tick"
+		{ message,e=session.Action(self.State,kind,a,b); if e!=nil { ret e }; self.View.Message=message }
+		if kind=="pause" { self.View.Window.AudioPause(self.State.Paused) }
+		for tick=0; tick<ticks; tick+=1 { session.Tick(self.State) }
+		ret nil
+	}
+	fn Sound(event:string)
+	{
+		if len(self.Sounds)!=7 { ret }
+		index:int64=1
+		if event=="door" { index=0 }
+		else if event=="hit" { index=3 }
+		else if event=="damage" or event=="hurt" { index=2 }
+		else if event=="wall" { index=5 }
+		else if event=="sabotage" or event=="escape" { index=6 }
+		else if event=="pickup" { index=4 }
+		_ = self.View.Window.PlaySound(self.Sounds[index],0.75)
+	}
+	fn Save(name:string)
+	{
+		e=persistence.Save(os.PathJoin(self.SaveDirectory,name),session.Encode(self.State))
+		if e != nil { self.View.Message="Save failed: "+e.str(); eprintln(self.View.Message) }
+		else { self.View.Message="Session saved." }
+	}
+	fn Load(name:string)
+	{
+		payload,e=persistence.Load(os.PathJoin(self.SaveDirectory,name))
+		if e != nil { self.View.Message="Load failed: "+e.str(); eprintln(self.View.Message); ret }
+		next,err=session.Decode(payload)
+		if err != nil { self.View.Message="Load failed: "+err.str(); eprintln(self.View.Message); ret }
+		self.State=next; self.View.Window.AudioClear(); self.View.Window.AudioPause(next.Paused)
+		self.View.Message="Session restored."
+	}
+	fn Action(action:string)
+	{
+		if action=="save" { self.Save("manual.captive"); ret }
+		if action=="load" { self.Load("manual.captive"); ret }
+		if action=="checkpoint" { self.Load("base-entry.captive"); ret }
+		if action=="pause"
+		{ _,_=session.Action(self.State,"pause",0,0); self.View.Window.AudioPause(self.State.Paused); ret }
+		if action=="" { ret }
+		kind=action; a:int64=0; b:int64=0
+		if strings.HasPrefix(action,"hand:")
+		{
+			parts=strings.Split(action,":"); kind="attack"; a=atoi(parts[1]); b=atoi(parts[2])
+			d=self.State.Droids[a]; held=d.Hands[b]
+			if held>=0 and held<len(d.Inventory)
+			{
+				item=d.Inventory[held]
+				if item.Kind=="clue"
+				{ if item.Charge==2 { self.View.Message="RATT: CHAESELUME" } else { self.View.Message=format("Clipboard message {}",item.Charge) }; ret }
+				if item.Kind=="probe" { self.View.Message="Planet probe secured. Sabotage the generators and escape."; ret }
+				if item.Kind=="explosives" { kind="interact" }
+				if item.Kind=="battery" or item.Kind=="device" or item.Kind=="optic" { kind="use"; b=held }
+			}
+			front=session.FrontCell(self.State)
+			if front>=0 and self.State.FixtureTypes[front]==0
+			{ kind="charge"; if held>=0 and d.Inventory[held].Kind=="battery" { kind="recharge-item"; b=held } }
+		}
+		else if strings.Contains(action,":")
+		{ parts=strings.Split(action,":"); kind=parts[0]; if len(parts)>1 { a=atoi(parts[1]) }; if len(parts)>2 { b=atoi(parts[2]) } }
+		message,e=session.Action(self.State,kind,a,b)
+		if e != nil { self.View.Message=e.str() } else { self.View.Message=message }
+	}
+	fn Key(code:int64)
+	{
+		if code==host.KeyEscape { self.Action("pause"); ret }
+		if code==host.KeyF5 { self.Save("quick.captive"); ret }
+		if code==host.KeyF9 { self.Load("quick.captive"); ret }
+		if code>=host.KeyF1 and code<=host.KeyF4
+		{ index=code-host.KeyF1; self.View.Page=0; if self.View.Inventory==index { self.View.Inventory=-1 } else { self.View.Inventory=index }; ret }
+		kind=""; direction:int64=0
+		if code==host.KeyW { kind="move"; direction=0 }
+		else if code==host.KeyS { kind="move"; direction=2 }
+		else if code==host.KeyA { kind="move"; direction=3 }
+		else if code==host.KeyD { kind="move"; direction=1 }
+		else if code==host.KeyQ { kind="turn"; direction=-1 }
+		else if code==host.KeyE { kind="turn"; direction=1 }
+		else if code==host.KeySpace or code==host.KeyEnter { self.Action("interact"); ret }
+		if kind!="" { _,e=session.Action(self.State,kind,direction,0); if e != nil { self.View.Message=e.str(); self.Sound("wall") } }
+	}
+}
+
+fn run() error
+{
+	basePath=".build/recovery/base0.tsv"
+	assetPath=".build/data"
+	artPath="assets/remaster"
+	savePath="saves"
+	resources=host.ResourcePath()
+	if resources!=""
+	{
+		basePath=os.PathJoin(resources,"base0.tsv"); assetPath=os.PathJoin(resources,"original"); artPath=os.PathJoin(resources,"remaster")
+		home,e=os.Home(); if e != nil { ret e }
+		savePath=os.PathJoin(home,"Library/Application Support/Captive")
+	}
+	seconds:int64=0; smoke=false; replayPath=""
+	for i=0; i<len(argv); i+=1
+	{
+		if argv[i]=="--smoke" { smoke=true; seconds=3 }
+		else if argv[i]=="--seconds" and i+1<len(argv) { i+=1; seconds=atoi(argv[i]); if seconds<1 or seconds>86400 { ret error("--seconds requires 1–86400") } }
+		else if argv[i]=="--base" and i+1<len(argv) { i+=1; basePath=argv[i] }
+		else if argv[i]=="--assets" and i+1<len(argv) { i+=1; assetPath=argv[i] }
+		else if argv[i]=="--saves" and i+1<len(argv) { i+=1; savePath=argv[i] }
+		else if argv[i]=="--replay" and i+1<len(argv) { i+=1; replayPath=argv[i] }
+		else { ret error("usage: captive [--smoke] [--seconds N] [--base FILE] [--assets DIR] [--saves DIR]") }
+	}
+	baseText,e=os.Readfile(basePath); if e != nil { ret e }
+	state,e=session.LoadBase(baseText); if e != nil { ret e }
+	reportPath=os.PathJoin(os.Dir(basePath),"mapgen-seed0.txt")
+	report,e=os.Readfile(reportPath); if e != nil { ret e }
+	e=session.Populate(state,report); if e != nil { ret e }
+	fixtures,e=os.Readfile(os.PathJoin(os.Dir(basePath),"base0-fixtures.tsv")); if e != nil { ret e }
+	e=session.LoadFixtures(state,fixtures); if e != nil { ret e }
+	traps,e=os.Readfile(os.PathJoin(os.Dir(basePath),"base0-traps.tsv")); if e != nil { ret e }
+	e=session.LoadTraps(state,traps); if e != nil { ret e }
+	stock,e=os.Readfile(os.PathJoin(os.Dir(basePath),"base0-stock.tsv")); if e!=nil { ret e }
+	e=session.LoadStock(state,stock); if e!=nil { ret e }
+	window=new host.Window("Captive — First Base")
+	if !window.Valid() { ret error("Cannot open macOS presentation") }
+	defer window.Close()
+	names:[]string=["Rook","Bishop","Knight","Pawn"]
+	if !smoke and replayPath==""
+	{
+		for i=0; i<4; i+=1
+		{
+			for
+			{
+				name=strings.Trim(host.Prompt(format("Droid {} chip",i+1),"Enter 1–19 letters or digits. Cancel keeps the current name.",names[i]))
+				if name=="" { break }
+				if validName(name) { names[i]=name; break }
+			}
+		}
+	}
+	e=session.InitialiseParty(state,names); if e != nil { ret e }
+	app=new Application; app.State=state; app.View=new presentation.View(window); app.SaveDirectory=savePath
+	// Original art is local inspection data, never a tracked game asset.
+	app.View.OriginalWall=window.LoadImage(os.PathJoin(assetPath,"original-wall.png"))
+	app.View.OriginalDoor=window.LoadImage(os.PathJoin(assetPath,"original-door.png"))
+	app.View.OriginalTree=window.LoadImage(os.PathJoin(assetPath,"original-tree.png"))
+	app.View.OriginalScavenger=window.LoadImage(os.PathJoin(assetPath,"original-scavenger.png"))
+	app.View.OriginalBrains=window.LoadImage(os.PathJoin(assetPath,"original-brains.png"))
+	app.View.Wall=window.LoadImage(os.PathJoin(artPath,"wall.png"))
+	app.View.Door=window.LoadImage(os.PathJoin(artPath,"door.png"))
+	app.View.Tree=window.LoadImage(os.PathJoin(artPath,"tree.png"))
+	app.View.Scavenger=window.LoadImage(os.PathJoin(artPath,"scavenger.png"))
+	app.View.Brains=window.LoadImage(os.PathJoin(artPath,"brains.png"))
+	app.View.Generator=window.LoadImage(os.PathJoin(artPath,"generator.png"))
+	app.View.Terminal=window.LoadImage(os.PathJoin(artPath,"terminal.png"))
+	app.View.Droid=window.LoadImage(os.PathJoin(artPath,"droid.png"))
+	app.Sounds=new([]int64)
+	for id=[19,29,30,32,33,35,38]
+	{ append(app.Sounds,window.LoadSound(os.PathJoin(assetPath,format("audio/effect-{}.wav",id)))) }
+	if !smoke
+	{
+		if !os.Isdir(savePath) { e=os.Mkdir(savePath,0o700); if e != nil { ret e } }
+		app.Save("base-entry.captive")
+	}
+	replay=new([]string); replayAt:int64=1
+	if replayPath!=""
+	{
+		text,e=os.Readfile(replayPath); if e!=nil { ret e }
+		if len(text)>4194304 { ret error("replay: transcript too large") }
+		replay=strings.SplitLines(strings.Trim(text))
+		if len(replay)<2 or len(replay)>100000 or replay[0]!="kind\ta\tb\tticks" { ret error("replay: invalid transcript") }
+	}
+	start=nano(); previous=start; accumulator:int64=0
+	for window.Pump()
+	{
+		for
+		{
+			kind=window.Event(); if kind==0 { break }
+			if replayPath!="" { continue }
+			if kind==1 { app.Key(window.Code()) }
+			else if kind==3 { app.Action(app.View.Click(app.State,window.X(),window.Y(),window.Code())) }
+			else if kind==6 and !smoke { app.State.Paused=true; window.AudioPause(true) }
+		}
+		current=nano(); elapsed=current-previous; previous=current
+		if elapsed<0 { elapsed=0 }; if elapsed>250000000 { elapsed=250000000 }
+		accumulator+=elapsed
+		if replayPath=="" { for accumulator>=16666667 { session.Tick(app.State); accumulator-=16666667 } }
+		else
+		{
+			e=app.Replay(replay[replayAt]); if e!=nil { ret error(format("replay row{}: {}",replayAt,e)) }
+			replayAt+=1
+		}
+		for event=session.DrainSounds(app.State) { app.Sound(event) }
+		app.View.Draw(app.State)
+		if replayPath!=""
+		{
+			if strings.HasPrefix(replay[replayAt-1],"save\t") { if !window.Capture(os.PathJoin(savePath,"replay-midway.png")) { ret error(window.Error()) } }
+			if replayAt==len(replay)
+			{
+				if !app.State.Escaped or !app.State.Probe or !app.State.Sabotaged or app.ReplayLoads==0 { ret error("replay did not complete the base and resume a saved session") }
+				if !window.Capture(os.PathJoin(savePath,"replay-final.png")) { ret error(window.Error()) }
+				println("Packaged replay completed: probe recovered, generators sabotaged, escaped after save/load.")
+				ret nil
+			}
+		}
+		if smoke and current-start>500000000 { _=window.Capture(".build/captive-smoke.png"); smoke=false }
+		if seconds>0 and current-start>=seconds*1000000000 { break }
+		sleep(16)
+	}
+	if replayPath!="" { ret error("replay interrupted before completion") }
+	ret nil
+}
+
+failure=run()
+if failure != nil { eprintln("Captive: {}",failure); exit(1) }
