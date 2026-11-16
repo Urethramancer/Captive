@@ -36,17 +36,18 @@ int main(void)
 		assert(image > 0);
 		captive_frame_begin(host, 0x111820ff);
 		captive_frame_crop(host, image, 0, 0, 0.5, 0.5, 64, 160, 80, 80);
+		captive_frame_rect(host, 64, 160, 80, 80, 0x00000020);
 		captive_frame_submit(host);
 		NSBitmapImageRep *capture = [window.contentView bitmapImageRepForCachingDisplayInRect:window.contentView.bounds];
 		[window.contentView cacheDisplayInRect:window.contentView.bounds toBitmapImageRep:capture];
 		NSColor *pixel = [[capture colorAtX:104 y:200] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-		assert(pixel.redComponent > 0.8 && pixel.blueComponent < 0.2);
+		assert(pixel.redComponent > 0.7 && pixel.blueComponent < 0.2);
 		NSString *capturePath = [directory stringByAppendingPathComponent:@"capture.png"];
 		assert(captive_frame_capture(host, capturePath.UTF8String));
 		NSBitmapImageRep *saved = [NSBitmapImageRep imageRepWithData:[NSData dataWithContentsOfFile:capturePath]];
 		assert(saved.pixelsWide == 1280 && saved.pixelsHigh == 800);
 		pixel = [[saved colorAtX:104 y:200] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-		assert(pixel.redComponent > 0.8 && pixel.blueComponent < 0.2);
+		assert(pixel.redComponent > 0.7 && pixel.blueComponent < 0.2);
 		NSEvent *press = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
 			modifierFlags:0 timestamp:0 windowNumber:window.windowNumber context:nil
 			characters:@"w" charactersIgnoringModifiers:@"w" isARepeat:NO keyCode:13];

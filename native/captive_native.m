@@ -167,7 +167,7 @@ static int key(unsigned short code)
 	for (CaptiveCommand *command in self.controller.frame) {
 		if (command.kind == 1) {
 			[colour(command.rgba) setFill];
-			NSRectFill(command.rect);
+			NSRectFillUsingOperation(command.rect, NSCompositingOperationSourceOver);
 		} else if (command.kind == 2) {
 			[command.text drawAtPoint:command.rect.origin withAttributes:@{
 				NSFontAttributeName: [NSFont monospacedSystemFontOfSize:command.size weight:NSFontWeightRegular],

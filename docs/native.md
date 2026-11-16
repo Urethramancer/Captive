@@ -80,5 +80,12 @@ The current compiler's `@impl objc` compilation does not enable ARC. The adapter
 therefore contains no owned Objective-C objects and links the separately built
 ARC archive through the root `mehkfile`. Build the project with an absolute
 source directory (`mehc build -F "$PWD"`) to avoid the compiler's duplicated
-relative path when resolving a nested module's native asset. `native-smoke.meh`
-is the minimal Meh window/PCM ABI check. No special Pinball flags are required.
+relative path when resolving a nested module's native asset. The game's
+`--smoke` mode exercises the Meh adapter with real artwork. No special Pinball
+flags are required.
+
+`tools/build-game.sh` runs the native prerequisite and the complete static Meh
+project build using the LLVM backend, then places the app executable at
+`.build/captive`. Source-file-only builds do not apply the root plan's archive
+link flags; use the project directory as the build input. The build cache defaults
+to ignored `.build/meh-cache`; an existing `MEH_CACHE_DIR` setting takes precedence.
