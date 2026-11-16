@@ -15,18 +15,19 @@ func main() {
 	fixtures := flag.String("fixtures", "", "also export the wall-fixture registry to this TSV")
 	traps := flag.String("traps", "", "also export cupboard-to-wall trap links to this TSV")
 	shops := flag.String("shops", "", "also export numbered shop coordinates to this TSV")
+	info := flag.String("info", "", "also export seed, entrance and floor sections to this TSV")
 	flag.Parse()
 	if flag.NArg() != 2 || *segment == "" {
 		fmt.Fprintln(os.Stderr, "usage: go run tools/mapgen-export/main.go -ds SEGMENT MEMORY OUTPUT.tsv")
 		os.Exit(2)
 	}
-	if err := export(*segment, flag.Arg(0), flag.Arg(1), *fixtures, *traps, *shops); err != nil {
+	if err := export(*segment, flag.Arg(0), flag.Arg(1), *fixtures, *traps, *shops, *info); err != nil {
 		fmt.Fprintln(os.Stderr, "mapgen-export:", err)
 		os.Exit(1)
 	}
 }
 
-func export(segment, input, output, fixtures, traps, shops string) error {
+func export(segment, input, output, fixtures, traps, shops string, info ...string) error {
 	s, err := strconv.ParseUint(segment, 0, 16)
 	if err != nil {
 		return fmt.Errorf("invalid data segment: %w", err)
@@ -103,6 +104,24 @@ func export(segment, input, output, fixtures, traps, shops string) error {
 	if x >= 64 || y >= 32 {
 		return fmt.Errorf("invalid start (%d,%d): check DS and generation state", x, y)
 	}
+	var metadata bytes.Buffer
+	if len(info) > 0 && info[0] != "" {
+		if len(memory) < base+0x446a {
+			return fmt.Errorf("memory is truncated before the map seed")
+		}
+		metadata.WriteString("seed\tstartX\tstartY\tfacing\tfloors\n")
+		fmt.Fprintf(&metadata, "%d\t%d\t%d\t2\t", word(0x4468), x, y)
+		for i, level := range memory[base+0x13f0 : base+0x1400] {
+			if level < 1 || level > 6 {
+				return fmt.Errorf("invalid floor section %d", i)
+			}
+			if i > 0 {
+				metadata.WriteByte(',')
+			}
+			fmt.Fprintf(&metadata, "%d", level)
+		}
+		metadata.WriteByte('\n')
+	}
 	var table bytes.Buffer
 	table.WriteString("x\ty\tterrain\tobject\tdetail\n")
 	for row := 0; row < 32; row++ {
@@ -127,6 +146,11 @@ func export(segment, input, output, fixtures, traps, shops string) error {
 	}
 	if shops != "" {
 		if err := writeAtomic(shops, shopTable.Bytes()); err != nil {
+			return err
+		}
+	}
+	if metadata.Len() > 0 {
+		if err := writeAtomic(info[0], metadata.Bytes()); err != nil {
 			return err
 		}
 	}

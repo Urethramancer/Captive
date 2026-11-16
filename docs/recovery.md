@@ -49,7 +49,26 @@ This base has **zero ladders, zero holes, zero fire/water tiles, zero raiser wal
 
 The [starting-game guide](https://captive.atari.org/Main/StartGame/StartGame.php) corroborates the entrance combination TL, BL, TR, BR; initial explosives/message; chip initialisation; airlock pushable wall; and using a socket to charge the leader's hand. The [item documentation](https://captive.atari.org/Tools/Items/Items.php) identifies computer passwords as the way to obtain planet probes, and touching a generator while holding explosives as sabotage. Therefore probe recovery is computer interaction, not a fabricated ground pickup.
 
-## Remaining verification
+## Second-base export
+
+The original DOS MapGen was run again for mission 1, level 1 (seed 0001),
+with complete map, encounter, object and switch reports. Its map starts at
+(12,1), with the entrance at (12,0). The section levels at DS:`13f0` are
+`1,2,2,2,6,2,2,6,6,6,6,6,6,6,6,6`; level six denotes unused sections here.
+The floor offset tables at DS:`1400` and `1408` give a 16-cell horizontal
+offset between the two occupied floors. The paired ladder coordinates are
+(8,3)/(24,3) and (2,4)/(18,4). There are four switch-to-door records, six
+shops and nine generators. All output remains ignored local inspection data.
+
+The second map TSV SHA-256 is
+`fa567ba232b043bced17826b74f0c29dab6f7a62baa0f6b27ccdf0de9796bfc6`;
+the complete text report SHA-256 is
+`7195cc2c3cac183774eda07e1e3d22f1bb697410ac1fe54f872d0a87d355c10d`.
+`mapgen-export -info FILE` preserves the seed, entrance and section levels.
+`main-export -seed 1` applies the recovered availability and quality rules,
+including the seed-dependent price increment, to produce 198 offers.
+
+## Remaining gameplay verification
 
 The [original English manual](https://captive.atari.org/Main/ReleaseInfo/Manual/CaptiveManualEnglish.pdf) and original MapGen hintbook provide complementary primary evidence. The actual Amiga game has not yet been played through alongside the export. The recovered first-base interactions, equipment and original sabotage structure are implemented; exact numerical reproduction remains a separate fidelity task.
 

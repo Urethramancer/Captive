@@ -68,7 +68,7 @@ func TestOriginalQualityMaskVectors(t *testing.T) {
 }
 
 func TestRejectDuplicateOrOutOfBoundsShops(t *testing.T) {
-	for _, text := range []string{"number\tx\ty\n1\t64\t0\n", "number\tx\ty\n1\t27\t17\n1\t24\t2\n", "number\tx\ty\n1\t27\t17\n"} {
+	for _, text := range []string{"number\tx\ty\n1\t64\t0\n", "number\tx\ty\n1\t27\t17\n1\t24\t2\n", "number\tx\ty\n"} {
 		p := filepath.Join(t.TempDir(), "shops.tsv")
 		if err := os.WriteFile(p, []byte(text), 0600); err != nil {
 			t.Fatal(err)

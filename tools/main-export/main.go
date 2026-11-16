@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"math/bits"
 	"os"
@@ -23,17 +24,26 @@ type descriptor struct {
 }
 
 func main() {
-	if len(os.Args) != 4 {
-		fmt.Fprintln(os.Stderr, "usage: go run tools/main-export/main.go FEDERATION BASE0-SHOPS.tsv OUTPUT.tsv")
+	seed := flag.Int("seed", 0, "original base seed")
+	flag.Parse()
+	if flag.NArg() != 3 {
+		fmt.Fprintln(os.Stderr, "usage: go run tools/main-export/main.go [-seed N] FEDERATION SHOPS.tsv OUTPUT.tsv")
 		os.Exit(2)
 	}
-	if err := run(os.Args[1], os.Args[2], os.Args[3]); err != nil {
+	if err := run(flag.Arg(0), flag.Arg(1), flag.Arg(2), *seed); err != nil {
 		fmt.Fprintln(os.Stderr, "main-export:", err)
 		os.Exit(1)
 	}
 }
 
-func run(input, shopPath, output string) error {
+func run(input, shopPath, output string, seeds ...int) error {
+	seed := 0
+	if len(seeds) > 0 {
+		seed = seeds[0]
+	}
+	if seed < 0 || seed > 65535 {
+		return fmt.Errorf("seed must be 0–65535")
+	}
 	data, err := os.ReadFile(input)
 	if err != nil {
 		return err
@@ -55,24 +65,27 @@ func run(input, shopPath, output string) error {
 	rows := 0
 	for _, s := range shops {
 		for _, d := range descriptors {
-			if !available(d.group, s.number, 0) || d.price == 0 {
+			if !available(d.group, s.number, seed) || d.price == 0 {
 				continue
 			}
 			category := -1
 			if d.kind == "weapon" {
-				category = 0
+				category = d.group - 2
 			}
 			for q := 0; q < 8; q++ {
 				if d.flags&1 == 0 {
 					if q != 0 {
 						continue
 					}
-				} else if qualityMask(d.index, d.itemData, s.number, 0, 0)&(1<<(7-q)) == 0 {
+				} else if qualityMask(d.index, d.itemData, s.number, 0, seed)&(1<<(7-q)) == 0 {
 					continue
 				}
 				price := d.price
 				if d.flags&1 != 0 {
 					price += d.increment * q
+				}
+				if d.flags&32 != 0 {
+					price += min(seed*d.increment, 32768)
 				}
 				fmt.Fprintf(&table, "%d\t%d\t%d\t%d\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n", s.number, s.x, s.y, d.index+19, d.kind, category, q, price, d.itemData, d.flags, d.name)
 				rows++
@@ -252,8 +265,8 @@ func readShops(path string) ([]shop, error) {
 	if err = scan.Err(); err != nil {
 		return nil, err
 	}
-	if len(out) != 6 {
-		return nil, fmt.Errorf("first base requires six numbered shops, got %d", len(out))
+	if len(out) < 1 || len(out) > 9 {
+		return nil, fmt.Errorf("expected 1–9 numbered shops, got %d", len(out))
 	}
 	return out, nil
 }

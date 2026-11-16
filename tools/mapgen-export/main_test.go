@@ -47,6 +47,10 @@ func TestExportRegistries(t *testing.T) {
 	word := func(offset int, v uint16) { binary.LittleEndian.PutUint16(b[offset:], v) }
 	word(0x1410, 30)
 	word(0x1412, 1)
+	word(0x4468, 1)
+	for i := 0; i < 16; i++ {
+		b[0x13f0+i] = 1
+	}
 	word(0x493c, 1)
 	word(0x4972, 0x4800)
 	copy(b[0x4800:], []byte{29, 1, 0, 0})
@@ -61,8 +65,13 @@ func TestExportRegistries(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := []string{filepath.Join(dir, "map"), filepath.Join(dir, "fixtures"), filepath.Join(dir, "traps"), filepath.Join(dir, "shops")}
-	if err := export("0", in, paths[0], paths[1], paths[2], paths[3]); err != nil {
+	info := filepath.Join(dir, "info")
+	if err := export("0", in, paths[0], paths[1], paths[2], paths[3], info); err != nil {
 		t.Fatal(err)
+	}
+	metadata, err := os.ReadFile(info)
+	if err != nil || string(metadata) != "seed\tstartX\tstartY\tfacing\tfloors\n1\t30\t1\t2\t1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1\n" {
+		t.Fatalf("incorrect map metadata: %q, %v", metadata, err)
 	}
 	for i, want := range []string{"x\ty\ttype\textra\n29\t1\t0\t0\n", "cupboardX\tcupboardY\twallX\twallY\n26\t1\t27\t0\n", "number\tx\ty\n1\t27\t17\n2\t24\t2\n"} {
 		got, err := os.ReadFile(paths[i+1])
