@@ -1,0 +1,13 @@
+@inc os
+@inc ./src/rnc
+fn main()
+{
+	if len(argv) != 2 { println("Usage: rnc-extract INPUT OUTPUT"); exit(2) }
+	input, e = os.ReadfileBytes(argv[0])
+	if e != nil { println("{}", e); exit(1) }
+	output, e = rnc.Decode(input)
+	if e != nil { println("{}: {}", argv[0], e); exit(1) }
+	e = os.Writefile(argv[1], str(output))
+	if e != nil { println("{}", e); exit(1) }
+	println("{}: {} bytes", argv[1], len(output))
+}

@@ -1,0 +1,58 @@
+@inc test
+@inc os
+@inc ./src/rnc
+fn oldFixture() []byte { ret [82,78,67,1,0,0,0,1,0,0,0,2,65,129] }
+fn modernFixture() []byte
+{
+	payload:[]byte = [136,8,0,2,0,2,65]
+	packedCRC = rnc.CRC(payload)
+	rawCRC = rnc.CRC([65])
+	data:[]byte = [82,78,67,1,0,0,0,1,0,0,0,7,byte(rawCRC >> 8),byte(rawCRC & 255),byte(packedCRC >> 8),byte(packedCRC & 255),0,1]
+	for b = payload { append(data, b) }
+	ret data
+}
+fn testRNC(t:test.Tester)
+{
+	t.equal(rnc.CRC(strbytes("123456789")), 47933, "CRC-16 known vector")
+	for data = [oldFixture(), modernFixture()]
+	{
+		out, e = rnc.Decode(data)
+		t.expect(e == nil, "decode literal fixture")
+		if e == nil { t.equalStr(str(out), "A", "literal output") }
+		for cut:int64 = 0; cut < len(data); cut += 1
+		{
+			_, bad = rnc.Decode(data[0:cut])
+			t.expect(bad != nil, "reject truncated fixture")
+		}
+	}
+	modern = modernFixture()
+	modern[14] = modern[14] ^ 1
+	_, packedBad = rnc.Decode(modern)
+	t.expect(packedBad != nil, "reject packed CRC corruption")
+	modern = modernFixture()
+	modern[12] = modern[12] ^ 1
+	_, rawBad = rnc.Decode(modern)
+	t.expect(rawBad != nil, "reject raw CRC corruption")
+	invalid:[]byte = [82,78,67,1,0,0,0,2,0,0,0,2,0,1]
+	_, refBad = rnc.Decode(invalid)
+	t.expect(refBad != nil, "reject reference before produced output")
+	oversized = oldFixture()
+	oversized[4] = 127
+	_, sizeBad = rnc.Decode(oversized)
+	t.expect(sizeBad != nil, "reject excessive output allocation")
+}
+fn testRNCBackReferences(t:test.Tester)
+{
+	old:[]byte = [82,78,67,1,0,0,0,3,0,0,0,3,0,65,129]
+	payload:[]byte = [136,136,16,33,4,0,2,0,65]
+	packedCRC = rnc.CRC(payload)
+	rawCRC = rnc.CRC([65,65,65])
+	modern:[]byte = [82,78,67,1,0,0,0,3,0,0,0,9,byte(rawCRC >> 8),byte(rawCRC & 255),byte(packedCRC >> 8),byte(packedCRC & 255),0,1]
+	for b = payload { append(modern, b) }
+	for data = [old, modern]
+	{
+		output, e = rnc.Decode(data)
+		if e != nil { println("overlap: {}", e) }; t.expect(e == nil, "decode overlapping reference")
+		if e == nil { t.equalStr(str(output), "AAA", "overlapping reference produces exact bytes") }
+	}
+}

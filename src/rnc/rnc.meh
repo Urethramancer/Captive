@@ -1,0 +1,262 @@
+@mod rnc
+
+// RNC format and algorithm reference: Ancient by Teemu Suutari (BSD-2-Clause).
+// See notices/ancient-BSD-2-Clause.txt. Original-derived decompressed data is never source.
+const MaxOutput:int64 = 16777216
+
+fn be32(data:[]byte, p:int64) int64
+{
+	ret (int(data[p]) << 24) | (int(data[p+1]) << 16) | (int(data[p+2]) << 8) | int(data[p+3])
+}
+fn be16(data:[]byte, p:int64) int64 { ret (int(data[p]) << 8) | int(data[p+1]) }
+
+// CRC computes the RNC CRC-16 (polynomial 0xa001, initial value zero).
+fn CRC(data:[]byte) int64
+{
+	crc:int64 = 0
+	for i:int64 = 0; i < len(data); i += 1
+	{
+		crc = crc ^ int(data[i])
+		for j:int64 = 0; j < 8; j += 1
+		{
+			if (crc & 1) != 0 { crc = (crc >> 1) ^ 40961 }
+			else { crc = crc >> 1 }
+		}
+	}
+	ret crc
+}
+class Reader
+{
+	data:[]byte
+	pos:int64
+	start:int64
+	end:int64
+	acc:int64
+	left:int64
+	back:bool
+	err:error
+	fn init(data:[]byte, start:int64, end:int64, back:bool)
+	{
+		self.data = data
+		self.start = start
+		self.end = end
+		self.back = back
+		self.pos = start
+		if back { self.pos = end }
+		self.acc = 0
+		self.left = 0
+		self.err = nil
+	}
+	fn Byte() int64
+	{
+		if self.err != nil { ret 0 }
+		if self.back
+		{
+			if self.pos <= self.start { self.err = error("RNC: truncated backward stream"); ret 0 }
+			self.pos -= 1
+			ret int(self.data[self.pos])
+		}
+		if self.pos >= self.end { self.err = error("RNC: truncated stream"); ret 0 }
+		value = int(self.data[self.pos])
+		self.pos += 1
+		ret value
+	}
+	fn Bits(count:int64) int64
+	{
+		if self.err != nil { ret 0 }
+		value:int64 = 0
+		for i:int64 = 0; i < count; i += 1
+		{
+			if self.left == 0
+			{
+				self.acc = self.Byte()
+				self.left = 8
+				if !self.back
+				{
+					// The final LE16 fetch permits a zero high padding byte.
+					if self.pos < self.end { self.acc = self.acc | (self.Byte() << 8) }
+					self.left = 16
+				}
+			}
+			if self.back
+			{
+				self.left -= 1
+				value = (value << 1) | ((self.acc >> self.left) & 1)
+			}
+			else
+			{
+				value = value | ((self.acc & 1) << i)
+				self.acc = self.acc >> 1
+				self.left -= 1
+			}
+		}
+		ret value
+	}
+}
+fn oldLiteral(r:Reader) int64
+{
+	widths:[]int64 = [1, 1, 2, 2, 3, 10]
+	offset:int64 = 0
+	for i:int64 = 0; i < 6; i += 1
+	{
+		value = r.Bits(widths[i])
+		if i == 5 or value != (1 << widths[i])-1 { ret offset-i+value }
+		offset += 1 << widths[i]
+	}
+	ret 0
+}
+fn oldDecode(data:[]byte, raw:int64, packed:int64) []byte, error
+{
+	if packed < 1 or packed > len(data)-12 { ret nil, error("RNC: truncated old header/payload") }
+	r = new Reader(data, 12, 12+packed, true)
+	anchor = r.Byte()
+	for i:int64 = 0; i < 7; i += 1
+	{
+		if (anchor & (1 << i)) != 0
+		{
+			r.acc = anchor >> (i+1)
+			r.left = 7-i
+			break
+		}
+	}
+	output = bytes(raw)
+	pos = raw
+	for pos > 0
+	{
+		literal = oldLiteral(r)
+		if r.err != nil { ret nil, r.err }
+		if literal > pos { ret nil, error("RNC: literal exceeds output") }
+		for i:int64 = 0; i < literal; i += 1 { pos -= 1; output[pos] = byte(r.Byte()) }
+		if r.err != nil { ret nil, r.err }
+		if pos == 0 { break }
+		code:int64 = 0
+		for code < 4 and r.Bits(1) != 0 { code += 1 }
+		lengthWidths:[]int64 = [0, 0, 1, 2, 10]
+		lengthOffsets:[]int64 = [0, 1, 2, 4, 8]
+		count = lengthOffsets[code] + r.Bits(lengthWidths[code]) + 2
+		distance:int64 = 0
+		if count == 2
+		{
+			if r.Bits(1) == 0 { distance = r.Bits(6) }
+			else { distance = r.Bits(9)+64 }
+		}
+		else
+		{
+			selector:int64 = 1
+			if r.Bits(1) != 0 { selector = 0; if r.Bits(1) != 0 { selector = 2 } }
+			widths:[]int64 = [5, 8, 12]
+			offsets:[]int64 = [0, 32, 288]
+			distance = offsets[selector] + r.Bits(widths[selector])
+		}
+		if distance == 0 { distance = 1 }
+		else { distance += count-1 }
+		if r.err != nil { ret nil, r.err }
+		if count > pos or distance > raw-pos { ret nil, error("RNC: invalid backward reference") }
+		for k:int64 = 0; k < count; k += 1 { pos -= 1; output[pos] = output[pos+distance] }
+	}
+	if r.pos != r.start { ret nil, error("RNC: unconsumed old payload") }
+	ret output, nil
+}
+class Table
+{
+	lengths:[]int64
+	codes:[]int64
+	fn init() { self.lengths = new([]int64); self.codes = new([]int64) }
+	fn Read(r:Reader) error
+	{
+		count = r.Bits(5)
+		self.lengths = new([]int64)
+		self.codes = new([]int64)
+		for i:int64 = 0; i < count; i += 1 { self.lengths.append(r.Bits(4)); self.codes.append(0) }
+		code:int64 = 0
+		for width:int64 = 1; width <= 15; width += 1
+		{
+			for i:int64 = 0; i < count; i += 1
+			{
+				if self.lengths[i] == width
+				{
+					if code >= (1 << width) { ret error("RNC: oversubscribed Huffman table") }
+					self.codes[i] = code
+					code += 1
+				}
+			}
+			code = code << 1
+		}
+		ret r.err
+	}
+	fn Value(r:Reader) int64
+	{
+		code:int64 = 0
+		for width:int64 = 1; width <= 15; width += 1
+		{
+			code = (code << 1) | r.Bits(1)
+			for i:int64 = 0; i < len(self.lengths); i += 1
+			{
+				if self.lengths[i] == width and self.codes[i] == code
+				{
+					if i < 2 { ret i }
+					ret (1 << (i-1)) | r.Bits(i-1)
+				}
+			}
+		}
+		r.err = error("RNC: invalid Huffman code")
+		ret 0
+	}
+}
+fn newDecode(data:[]byte, raw:int64, packed:int64) []byte, error
+{
+	if packed > len(data)-18 { ret nil, error("RNC: truncated payload") }
+	if CRC(data[18:18+packed]) != be16(data, 14) { ret nil, error("RNC: packed checksum mismatch") }
+	r = new Reader(data, 18, 18+packed, false)
+	r.Bits(2)
+	output = bytes(raw)
+	pos:int64 = 0
+	chunks:int64 = 0
+	for pos < raw
+	{
+		lit = new Table()
+		dist = new Table()
+		length = new Table()
+		e = lit.Read(r); if e != nil { ret nil, e }
+		e = dist.Read(r); if e != nil { ret nil, e }
+		e = length.Read(r); if e != nil { ret nil, e }
+		count = r.Bits(16)
+		if count == 0 { ret nil, error("RNC: empty chunk") }
+		for sub:int64 = 0; sub < count; sub += 1
+		{
+			n = lit.Value(r)
+			if r.err != nil { ret nil, r.err }
+			if n > raw-pos { ret nil, error("RNC: literal exceeds output") }
+			for i:int64 = 0; i < n; i += 1 { output[pos] = byte(r.Byte()); pos += 1 }
+			if sub+1 < count
+			{
+				distance = dist.Value(r)+1
+				n = length.Value(r)+2
+				if distance > pos or n > raw-pos { ret nil, error("RNC: invalid forward reference") }
+				for i:int64 = 0; i < n; i += 1 { output[pos] = output[pos-distance]; pos += 1 }
+			}
+			if r.err != nil { ret nil, r.err }
+		}
+		chunks += 1
+		if chunks > 255 { ret nil, error("RNC: excessive chunks") }
+	}
+	if chunks != int(data[17]) { ret nil, error("RNC: chunk count mismatch") }
+	if CRC(output) != be16(data, 12) { ret nil, error("RNC: output checksum mismatch") }
+	ret output, nil
+}
+// Decode decompresses a bounded RNC1 old or checksum-bearing new stream.
+fn Decode(data:[]byte) []byte, error
+{
+	if len(data) < 12 { ret nil, error("RNC: truncated header") }
+	if data[0] != 82 or data[1] != 78 or data[2] != 67 or data[3] != 1 { ret nil, error("RNC: unsupported signature/method") }
+	raw = be32(data, 4)
+	packed = be32(data, 8)
+	if raw < 1 or raw > MaxOutput or packed < 1 or packed > MaxOutput { ret nil, error("RNC: size exceeds bounds") }
+	// Captive uses the original twelve-byte format. New format selection follows
+	// Ancient's structural/CRC discriminator rather than treating old bytes as CRCs.
+	if len(data) >= 18+packed and (data[18] & 3) == 0 and (data[18] & 124) != 0
+	{
+		ret newDecode(data, raw, packed)
+	}
+	ret oldDecode(data, raw, packed)
+}
