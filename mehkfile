@@ -19,6 +19,7 @@ fn targets()
 	e = os.Setenv("CC",compiler)
 	if e != nil { eprintln(e.str()); exit(1) }
 	p = mehk.Project("local/captive")
+	p.Version("0.1.0")
 	p.Directory(".build")
 	g = p.Binary("captive")
 	g.Source(os.PathJoin(root,"main.meh"))

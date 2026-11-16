@@ -41,7 +41,7 @@ open .build/Captive.app
 
 The app includes its required local assets. Manual saves, quicksaves and its
 separate base-entry checkpoint live in Application Support when packaged; the
-development executable uses `saves/`. Neither location is tracked.
+development executable uses `saves/` beside the project executable. Neither location is tracked.
 `tools/build-game.sh` builds the static executable at `.build/captive` used by
 packaging. `tools/test-build.sh` checks a clean source copy with an empty cache
 and no native archive, including builds invoked from another directory.
@@ -60,9 +60,19 @@ mehc build base-playthrough.meh -o .build/base-playthrough -F
 
 W/S move forward/back, A/D strafe and Q/E turn by a quarter turn. Click the view
 or Interact for world objects, and click a droid's hands to use equipment.
-F1–F4 open inventories, F5/F9 quicksave/load and Escape pauses. The toolbar offers
+F1–F4 open inventories, F5/F9 quicksave/load and Escape pauses in a normal window.
+Control-Command-F or the toolbar toggles fullscreen; Escape leaves fullscreen.
+Close the window, press Command-Q or choose Quit Captive to quit, including
+while editing. The toolbar offers
 manual save/load, the entry checkpoint, original artwork and fullscreen.
 Hover controls for details; the droid panels remain visible during play.
+
+Both the app and standalone executable find their data independently of the
+working directory; no command arguments are needed for normal play.
+The party starts as Rook, Bishop, Knight and Pawn without startup dialogs.
+Double-click a droid's name to edit it inline; Enter saves, Escape cancels and
+Command-A selects all. Names use 1–19 letters or digits. Computer passwords
+also use an inline field. Simulation and audio pause while typing.
 
 Runtime artwork is 1024×1024 with sprite transparency preserved. The first base
 uses cream entry panels, dark reactor metal and green service hatches across

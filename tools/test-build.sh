@@ -5,11 +5,8 @@ cd "$(dirname "$0")/.."
 project_root=$PWD
 checkout=$(mktemp -d "${TMPDIR:-/tmp}/captive-build.XXXXXX")
 trap 'rm -rf "$checkout"' EXIT
-git ls-files -z -- '*.meh' '*.m' '*.h' mehkfile tools/compile-native.sh |
+git ls-files --cached --others --exclude-standard -z -- '*.meh' '*.m' '*.h' mehkfile tools/compile-native.sh |
 	tar --null -T - -cf - | tar -xf - -C "$checkout"
-# Include the new wrapper when testing an uncommitted working tree.
-mkdir -p "$checkout/tools"
-cp tools/compile-native.sh "$checkout/tools/compile-native.sh"
 (
 	cd "$checkout"
 	MEH_CACHE_DIR="$checkout/.build/cache" mehc build

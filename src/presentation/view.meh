@@ -1,6 +1,7 @@
 @mod presentation
 @inc src/host
 @inc src/session
+@inc src/editing
 
 const ink:uint32 = 0xd8ddcaff
 const muted:uint32 = 0x99aaa6ff
@@ -37,6 +38,7 @@ fn stockName(offer:session.Offer) string
 class View
 {
 	Window:host.Window
+	Editor:editing.Field
 	Inventory:int64
 	Page:int64
 	StockPage:int64
@@ -65,6 +67,7 @@ class View
 	fn init(window:host.Window)
 	{
 		self.Window = window; self.Inventory = -1
+		self.Editor=new editing.Field
 		self.SelectedItem=-1
 		self.Message = "Recover the probe. Disable the generators. Return to the entrance."
 		self.Depth = new([]float64)
@@ -268,7 +271,13 @@ class View
 		w.Rect(x,598.0,302.0,4.0,colours[index])
 		name=d.Name; if len(name)>12 { name=name[:12]+"…" }; if s.Leader == index { name="◆ "+name }
 		if self.Droid>0 { w.Image(self.Droid,x+8.0,607.0,52.0,52.0) }
-		w.Text(name,x+68.0,611.0,17.0,ink)
+		if self.Editor.Kind=="name" and self.Editor.Droid==index
+		{
+			colour:uint32=0x101a18ff; if self.Editor.Selected { colour=0x596148ff }
+			w.Rect(x+66.0,606.0,156.0,28.0,colour)
+			w.Text(self.Editor.Display(),x+68.0,613.0,12.0,amber)
+		}
+		else { w.Text(name,x+68.0,611.0,17.0,ink) }
 		position="REAR"; if s.Formation[0] == index or s.Formation[1] == index { position="FRONT" }
 		w.Text(position,x+232.0,614.0,12.0,muted)
 		w.Text(format("{}%",d.Energy),x+72.0,641.0,13.0,muted)
@@ -289,7 +298,7 @@ class View
 		}
 		if session.HasEquipment(s,"optic",5)
 		{ w.Text(format("H{} C{} A{}/{} L{}/{}",d.Parts[0],d.Parts[1],d.Parts[2],d.Parts[3],d.Parts[4],d.Parts[5]),x+12.0,742.0,11.0,ink) }
-		else { w.Text(format("F{} inventory   ·   click name to lead",index+1),x+12.0,742.0,11.0,muted) }
+		else { w.Text(format("F{} inventory · double-click name to edit",index+1),x+12.0,742.0,11.0,muted) }
 	}
 	fn Navigation(s:session.State)
 	{
@@ -325,7 +334,8 @@ class View
 		w.Text("REMOTE DROID LINK / FIRST BASE",203.0,37.0,13.0,muted)
 		self.Button("SAVE",612.0,28.0,68.0); self.Button("LOAD",688.0,28.0,68.0)
 		self.Button("PAUSE",764.0,28.0,76.0); self.Button("ART",848.0,28.0,64.0)
-		self.Button("FULLSCREEN",920.0,28.0,112.0); self.Button("CHECKPOINT",1040.0,28.0,208.0)
+		fullscreen="FULLSCREEN"; if self.Window.IsFullscreen() { fullscreen="EXIT FULL" }
+		self.Button(fullscreen,920.0,28.0,112.0); self.Button("CHECKPOINT",1040.0,28.0,208.0)
 		self.Corridor(s)
 		w.Rect(968.0,78.0,280.0,500.0,uint32(0x101b19ff))
 		w.Text("OPERATIONS",984.0,96.0,18.0,amber)
@@ -398,7 +408,16 @@ class View
 			if inside(mx,my,left,704.0,302.0,30.0) { hint="Click a hand to use it. Right-click held equipment while facing a shop to repair it." }
 		}
 		if hint!="" { w.Rect(20.0,764.0,1240.0,32.0,uint32(0x0a1715ff)); w.Text(hint,28.0,774.0,12.0,ink) }
-		if s.Paused
+		if self.Editor.Kind!="" { w.Text("Enter saves · Escape cancels · Cmd+A selects all",28.0,774.0,12.0,amber) }
+		if self.Editor.Kind=="password"
+		{
+			w.Rect(216.0,234.0,544.0,156.0,uint32(0x061412ef))
+			w.Text("COMPUTER ACCESS",260.0,258.0,26.0,ink)
+			w.Rect(252.0,304.0,472.0,32.0,uint32(0x34403dff))
+			w.Text(self.Editor.Display(),260.0,312.0,16.0,amber)
+			w.Text("Enter the password from the clipboard message.",260.0,354.0,14.0,muted)
+		}
+		if s.Paused and self.Editor.Kind==""
 		{
 			w.Rect(216.0,234.0,544.0,156.0,uint32(0x061412ef))
 			w.Text("LINK SUSPENDED",316.0,258.0,30.0,ink)
@@ -414,7 +433,7 @@ class View
 		w.Submit()
 	}
 	// Click returns an action for the application boundary to dispatch.
-	fn Click(s:session.State, x:float64, y:float64, button:int64) string
+	fn Click(s:session.State, x:float64, y:float64, button:int64, doubleClick:bool) string
 	{
 		if s.CursorCharge>0 and s.CameraIndex<0 and inside(x,y,804.0,132.0,128.0,30.0) { ret "spark" }
 		if len(s.Cameras)>0
@@ -455,6 +474,7 @@ class View
 			if inside(x,y,left+12.0,661.0,276.0,31.0) { ret format("repair:{}:{}",i,int64((x-left-12.0)/46.0)) }
 			if inside(x,y,left,598.0,302.0,40.0)
 			{
+				if button==0 and doubleClick { ret format("rename:{}",i) }
 				if button==1 and self.Inventory>=0 and self.Inventory!=i and self.SelectedItem>=0
 				{ item=self.SelectedItem; self.SelectedItem=-1; ret format("transfer:{}:{}",self.Inventory*64+item,i) }
 				e=session.SetLeader(s,i); if e != nil { self.Message=e.str() }; self.Inventory=i; self.Page=0; self.SelectedItem=-1; ret ""

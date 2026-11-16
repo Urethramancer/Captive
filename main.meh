@@ -22,6 +22,34 @@ class Application
 	ReplaySnapshot:string
 	ReplayLoads:int64
 	ResetClock:bool
+	EditorWasPaused:bool
+	fn BeginEdit(kind:string, droid:int64)
+	{
+		text=""; if kind=="name" { text=self.State.Droids[droid].Name }
+		self.View.Editor.Begin(kind,droid,text)
+		self.EditorWasPaused=self.State.Paused; self.State.Paused=true
+		self.View.Window.AudioPause(true)
+	}
+	fn Text(code:int64)
+	{
+		field=self.View.Editor; result=field.Input(code); if result==0 { ret }
+		if result==1
+		{
+			if field.Kind=="name"
+			{
+				if !validName(field.Text) { self.View.Message="Use 1–19 letters or digits."; ret }
+				self.State.Droids[field.Droid].Name=field.Text; self.View.Message="Droid name saved."
+			}
+			else
+			{
+				self.State.Paused=self.EditorWasPaused
+				message,e=session.EnterPassword(self.State,field.Text)
+				if e!=nil { self.View.Message=e.str() } else { self.View.Message=message }
+			}
+		}
+		field.Kind=""; self.State.Paused=self.EditorWasPaused
+		self.View.Window.AudioPause(self.State.Paused); self.ResetClock=true
+	}
 	fn Feedback(message:string)
 	{
 		at=strings.IndexOf(message," hit for ")
@@ -85,6 +113,7 @@ class Application
 	}
 	fn Action(action:string)
 	{
+		if strings.HasPrefix(action,"rename:") { self.BeginEdit("name",atoi(action[7:])); ret }
 		if action=="save" { self.Save("manual.captive"); ret }
 		if action=="load" { self.Load("manual.captive"); ret }
 		if action=="checkpoint" { self.Load("base-entry.captive"); ret }
@@ -97,12 +126,7 @@ class Application
 			front=session.FrontCell(self.State)
 			if front>=0 and (self.State.Objects[front]&127)==0x13
 			{
-				self.View.Window.AudioPause(true)
-				password=host.Prompt("Base computer","Enter the computer password from the clipboard.","")
-				self.View.Window.AudioPause(false); self.ResetClock=true
-				if password=="" { self.View.Message="Computer link closed."; ret }
-				message,e=session.EnterPassword(self.State,password)
-				if e!=nil { self.View.Message=e.str() } else { self.View.Message=message }; ret
+				self.BeginEdit("password",-1); ret
 			}
 		}
 		kind=action; a:int64=0; b:int64=0
@@ -151,10 +175,13 @@ class Application
 
 fn run() error
 {
-	basePath=".build/recovery/base0.tsv"
-	assetPath=".build/data"
-	artPath="assets/remaster"
-	savePath="saves"
+	root=host.ExecutableDirectory()
+	if root=="" { ret error("Cannot locate the game executable") }
+	if !os.Exists(os.PathJoin(root,".build/recovery/base0.tsv")) and os.Base(root)==".build" { root=os.Dir(root) }
+	basePath=os.PathJoin(root,".build/recovery/base0.tsv")
+	assetPath=os.PathJoin(root,".build/data")
+	artPath=os.PathJoin(root,"assets/remaster")
+	savePath=os.PathJoin(root,"saves")
 	resources=host.ResourcePath()
 	if resources!=""
 	{
@@ -188,18 +215,6 @@ fn run() error
 	if !window.Valid() { ret error("Cannot open macOS presentation") }
 	defer window.Close()
 	names:[]string=["Rook","Bishop","Knight","Pawn"]
-	if !smoke and replayPath==""
-	{
-		for i=0; i<4; i+=1
-		{
-			for
-			{
-				name=strings.Trim(host.Prompt(format("Droid {} chip",i+1),"Enter 1–19 letters or digits. Cancel keeps the current name.",names[i]))
-				if name=="" { break }
-				if validName(name) { names[i]=name; break }
-			}
-		}
-	}
 	e=session.InitialiseParty(state,names); if e != nil { ret e }
 	app=new Application; app.State=state; app.View=new presentation.View(window); app.SaveDirectory=savePath
 	// Original art is local inspection data, never a tracked game asset.
@@ -226,7 +241,7 @@ fn run() error
 	{ append(app.Sounds,window.LoadSound(os.PathJoin(assetPath,format("audio/effect-{}.wav",id)))) }
 	if !smoke
 	{
-		if !os.Isdir(savePath) { e=os.Mkdir(savePath,0o700); if e != nil { ret e } }
+		if !os.Isdir(savePath) { e=os.Mkdirall(savePath,0o700); if e != nil { ret e } }
 		app.Save("base-entry.captive")
 	}
 	replay=new([]string); replayAt:int64=1
@@ -244,8 +259,14 @@ fn run() error
 		{
 			kind=window.Event(); if kind==0 { break }
 			if replayPath!="" { continue }
+			if app.View.Editor.Kind!=""
+			{
+				if kind==8 { app.Text(window.Code()) }
+				else if kind==6 { app.EditorWasPaused=true }
+				continue
+			}
 			if kind==1 { app.Key(window.Code()) }
-			else if kind==3 { app.Action(app.View.Click(app.State,window.X(),window.Y(),window.Code())) }
+			else if kind==3 { app.Action(app.View.Click(app.State,window.X(),window.Y(),window.Code(),window.Repeated())) }
 			else if kind==6 and !smoke { app.State.Paused=true; window.AudioPause(true) }
 		}
 		current=nano(); elapsed=current-previous; previous=current

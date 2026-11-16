@@ -18,8 +18,11 @@ access to the logged-in macOS window and audio services. Tests check key input,
 letterboxed mouse coordinates at 1280×800 through offscreen 4K sizes, event
 overflow, image crop orientation and PNG
 capture pixels, unsigned 8-bit WAV caching, invalid PCM, eight-voice limits,
-pause, clearing and replay, and window closure. This does not verify final
-artwork, audible sound fidelity, fullscreen animation or an actual game session.
+pause, clearing and replay, window closure, Command-Q and fullscreen transitions.
+`tools/test-launch.sh` additionally runs the current `.build/captive` without
+arguments from an unrelated directory, renames a droid inline, saves, and exits
+using both close and Command-Q. It uses isolated saves and a test-only injected
+driver. These checks do not verify final artwork or audible sound fidelity.
 
 ## C interface
 
@@ -30,12 +33,18 @@ host exactly once. A false pump result indicates a closed window. Event fields
 are `kind`, `code`, `x`, `y`, `repeat`; the C layout is 32 bytes on arm64, with
 double coordinates at byte offsets 8 and 16. Unknown keys have code zero.
 
-Events distinguish key down/up, mouse down/up, close, focus loss and mouse movement.
+Events distinguish key down/up, mouse down/up, close, focus loss, mouse movement
+and inline text input (kind 8). Text codes include ASCII letters/digits,
+Enter (13), Escape (27), backspace (8), delete (127), left/right (28/29),
+home/end (30/31) and select all (1). Mouse events use `repeat` for double-clicks;
+key events use it for key repeat.
 Consecutive mouse movements coalesce. On focus
 loss, clear held controls. The 128-event queue drops stale input on overflow and
 inserts a focus-loss event before fresh input. W/S/A/D/Q/E, Escape, F1–F4, F5,
 F9, Enter and Space have stable bridge codes. Command-Q closes the host window.
-Fullscreen is an explicit call so gameplay can choose its binding.
+The toolbar and Control-Command-F toggle native fullscreen; Escape leaves it.
+Transition guards ignore repeated toggles until the animation completes.
+The native application menu handles quit and close while the game loop unwinds.
 
 Frames use a 1280×800 canvas with a top-left origin. The view uniformly scales
 and centres that canvas, clipping to its bounds and filling unused margins with

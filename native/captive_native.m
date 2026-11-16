@@ -3,6 +3,9 @@
 #import <AVFoundation/AVFoundation.h>
 #import <ImageIO/ImageIO.h>
 #include <math.h>
+#include <mach-o/dyld.h>
+#include <stdlib.h>
+#include <string.h>
 #include "captive_native.h"
 
 @interface CaptiveCommand : NSObject
@@ -37,7 +40,7 @@
 @property(weak) CaptiveController *controller;
 @property(strong) NSTrackingArea *tracking;
 @end
-@interface CaptiveController : NSObject <NSWindowDelegate> {
+@interface CaptiveController : NSObject <NSWindowDelegate, NSApplicationDelegate, NSMenuItemValidation> {
 @public
 	CaptiveEvent events[128];
 	unsigned readEvent, writeEvent;
@@ -56,8 +59,11 @@
 @property uint32_t frameBackground;
 @property BOOL closed;
 @property BOOL paused;
+@property BOOL fullscreenTransition;
 - (void)push:(CaptiveEvent)event;
 - (NSPoint)logicalPoint:(NSPoint)point;
+- (void)requestClose;
+- (void)toggleFullscreen:(id)sender;
 @end
 
 static NSColor *colour(uint32_t rgba)
@@ -100,14 +106,49 @@ static int key(unsigned short code)
 	return NSMakePoint((point.x - (self.view.bounds.size.width - 1280 * scale) / 2) / scale,
 		(point.y - (self.view.bounds.size.height - 800 * scale) / 2) / scale);
 }
+- (void)requestClose
+{
+	if (self.closed) return;
+	self.closed = YES;
+	[self push:(CaptiveEvent){.kind = 5}];
+	if (NSApp.modalWindow) [NSApp abortModal];
+	[self.window orderOut:nil];
+}
 - (BOOL)windowShouldClose:(NSWindow *)sender
 {
 	(void)sender;
-	self.closed = YES;
-	[self push:(CaptiveEvent){.kind = 5}];
-	[self.window orderOut:nil];
-	return NO;
+	[self requestClose];
+	return YES;
 }
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
+{
+	(void)sender;
+	[self requestClose];
+	// Let the Meh loop unwind and release the window and audio engine.
+	return NSTerminateCancel;
+}
+- (void)toggleFullscreen:(id)sender
+{
+	(void)sender;
+	if (self.closed || self.fullscreenTransition) return;
+	self.fullscreenTransition = YES;
+	[self.window toggleFullScreen:nil];
+}
+- (BOOL)validateMenuItem:(NSMenuItem *)item
+{
+	if (item.action == @selector(toggleFullscreen:)) {
+		item.title = (self.window.styleMask & NSWindowStyleMaskFullScreen)
+			? @"Exit Full Screen" : @"Enter Full Screen";
+		return !self.closed && !self.fullscreenTransition;
+	}
+	return !self.closed;
+}
+- (void)windowWillEnterFullScreen:(NSNotification *)notification { (void)notification; self.fullscreenTransition = YES; }
+- (void)windowWillExitFullScreen:(NSNotification *)notification { (void)notification; self.fullscreenTransition = YES; }
+- (void)windowDidEnterFullScreen:(NSNotification *)notification { (void)notification; self.fullscreenTransition = NO; }
+- (void)windowDidExitFullScreen:(NSNotification *)notification { (void)notification; self.fullscreenTransition = NO; }
+- (void)windowDidFailToEnterFullScreen:(NSWindow *)window { (void)window; self.fullscreenTransition = NO; }
+- (void)windowDidFailToExitFullScreen:(NSWindow *)window { (void)window; self.fullscreenTransition = NO; }
 - (void)windowDidResignKey:(NSNotification *)notification
 {
 	(void)notification;
@@ -128,11 +169,31 @@ static int key(unsigned short code)
 }
 - (void)keyDown:(NSEvent *)event
 {
-	if ((event.modifierFlags & NSEventModifierFlagCommand) && [event.charactersIgnoringModifiers isEqualToString:@"q"]) {
-		[self.controller windowShouldClose:self.window];
+	if (event.keyCode == 53 && event.isARepeat) return;
+	if (event.keyCode == 53 && (self.window.styleMask & NSWindowStyleMaskFullScreen)) {
+		[self.controller toggleFullscreen:nil];
+		return;
+	}
+	if (event.modifierFlags & NSEventModifierFlagCommand) {
+		if ([event.charactersIgnoringModifiers.lowercaseString isEqualToString:@"a"])
+			[self.controller push:(CaptiveEvent){.kind = 8, .code = 1}];
+		else [super keyDown:event];
 		return;
 	}
 	[self.controller push:(CaptiveEvent){.kind = 1, .code = key(event.keyCode), .repeat = event.isARepeat}];
+	int text = 0;
+	switch (event.keyCode) {
+		case 36: case 76: text = 13; break;
+		case 53: text = 27; break;
+		case 51: text = 8; break;
+		case 117: text = 127; break;
+		case 123: text = 28; break;
+		case 124: text = 29; break;
+		case 115: text = 30; break;
+		case 119: text = 31; break;
+		default: if (event.characters.length == 1) text = [event.characters characterAtIndex:0]; break;
+	}
+	if (text) [self.controller push:(CaptiveEvent){.kind = 8, .code = text, .repeat = event.isARepeat}];
 }
 - (void)keyUp:(NSEvent *)event
 {
@@ -141,7 +202,7 @@ static int key(unsigned short code)
 - (void)mouse:(NSEvent *)event kind:(int)kind
 {
 	NSPoint point = [self.controller logicalPoint:[self convertPoint:event.locationInWindow fromView:nil]];
-	[self.controller push:(CaptiveEvent){.kind = kind, .code = (int)event.buttonNumber, .x = point.x, .y = point.y}];
+	[self.controller push:(CaptiveEvent){.kind = kind, .code = (int)event.buttonNumber, .x = point.x, .y = point.y, .repeat = event.clickCount >= 2}];
 }
 - (void)mouseDown:(NSEvent *)event { [self mouse:event kind:3]; }
 - (void)mouseUp:(NSEvent *)event { [self mouse:event kind:4]; }
@@ -218,6 +279,22 @@ CaptiveHost *captive_host_create(const char *title)
 		host.window.acceptsMouseMovedEvents = YES;
 		host.window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
 		host.window.delegate = host;
+		NSApp.delegate = host;
+		NSMenu *menu = [NSMenu new];
+		NSMenuItem *appItem = [menu addItemWithTitle:@"Captive" action:NULL keyEquivalent:@""];
+		appItem.submenu = [[NSMenu alloc] initWithTitle:@"Captive"];
+		NSMenuItem *quit = [appItem.submenu addItemWithTitle:@"Quit Captive" action:@selector(terminate:) keyEquivalent:@"q"];
+		quit.target = NSApp;
+		NSMenuItem *fileItem = [menu addItemWithTitle:@"File" action:NULL keyEquivalent:@""];
+		fileItem.submenu = [[NSMenu alloc] initWithTitle:@"File"];
+		NSMenuItem *close = [fileItem.submenu addItemWithTitle:@"Close Window" action:@selector(performClose:) keyEquivalent:@"w"];
+		close.target = host.window;
+		NSMenuItem *viewItem = [menu addItemWithTitle:@"View" action:NULL keyEquivalent:@""];
+		viewItem.submenu = [[NSMenu alloc] initWithTitle:@"View"];
+		NSMenuItem *fullscreen = [viewItem.submenu addItemWithTitle:@"Enter Full Screen" action:@selector(toggleFullscreen:) keyEquivalent:@"f"];
+		fullscreen.keyEquivalentModifierMask = NSEventModifierFlagControl | NSEventModifierFlagCommand;
+		fullscreen.target = host;
+		NSApp.mainMenu = menu;
 		host.view = [[CaptiveView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 800)];
 		host.view.controller = host;
 		host.window.contentView = host.view;
@@ -237,6 +314,7 @@ void captive_host_destroy(CaptiveHost *handle)
 		captive_audio_clear((__bridge CaptiveHost *)host);
 		[host.engine stop];
 		host.window.delegate = nil;
+		if (NSApp.delegate == host) { NSApp.delegate = nil; NSApp.mainMenu = nil; }
 		host.view.controller = nil;
 		[host.window close];
 	}
@@ -247,7 +325,7 @@ int32_t captive_host_pump(CaptiveHost *handle)
 	if (!handle) return 0;
 	@autoreleasepool {
 		NSEvent *event;
-		while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate distantPast]
+		while (!controller(handle).closed && (event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate distantPast]
 			inMode:NSDefaultRunLoopMode dequeue:YES])) [NSApp sendEvent:event];
 		[NSApp updateWindows];
 		return !controller(handle).closed;
@@ -264,8 +342,12 @@ int32_t captive_host_event(CaptiveHost *handle, CaptiveEvent *event)
 void captive_host_fullscreen(CaptiveHost *host)
 {
 	@autoreleasepool {
-		if (host) [controller(host).window toggleFullScreen:nil];
+		if (host) [controller(host) toggleFullscreen:nil];
 	}
+}
+int32_t captive_host_is_fullscreen(CaptiveHost *host)
+{
+	return host && (controller(host).window.styleMask & NSWindowStyleMaskFullScreen) != 0;
 }
 double captive_mouse_x(CaptiveHost *handle)
 {
@@ -284,31 +366,33 @@ double captive_mouse_y(CaptiveHost *handle)
 const char *captive_resources(void)
 {
 	@autoreleasepool {
-		static NSString *path;
+		static char *path;
 		if (!path) {
 			NSBundle *bundle = NSBundle.mainBundle;
-			path = [bundle.bundlePath.pathExtension isEqualToString:@"app"] ? bundle.resourcePath : @"";
+			NSString *resources = [bundle.bundlePath.pathExtension isEqualToString:@"app"] ? bundle.resourcePath : @"";
+			path = strdup(resources.UTF8String);
 		}
-		return path.UTF8String;
+		return path ?: "";
 	}
 }
-const char *captive_prompt(const char *title, const char *message, const char *initial)
+const char *captive_executable_directory(void)
 {
 	@autoreleasepool {
-		static NSString *answer;
-		answer = @"";
-		if (![NSThread isMainThread]) return answer.UTF8String;
-		NSAlert *alert = [NSAlert new];
-		alert.messageText = title ? [NSString stringWithUTF8String:title] ?: @"Captive" : @"Captive";
-		alert.informativeText = message ? [NSString stringWithUTF8String:message] ?: @"" : @"";
-		[alert addButtonWithTitle:@"Confirm"];
-		[alert addButtonWithTitle:@"Cancel"];
-		NSTextField *input = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 320, 28)];
-		input.stringValue = initial ? [NSString stringWithUTF8String:initial] ?: @"" : @"";
-		alert.accessoryView = input;
-		[alert.window setInitialFirstResponder:input];
-		if ([alert runModal] == NSAlertFirstButtonReturn) answer = [input.stringValue copy];
-		return answer.UTF8String;
+		static char *directory;
+		if (!directory) {
+			uint32_t size = 0;
+			_NSGetExecutablePath(NULL, &size);
+			if (!size || size > 1048576) return "";
+			char *path = malloc(size);
+			if (!path) return "";
+			if (_NSGetExecutablePath(path, &size) == 0) {
+				NSString *executable = [[NSFileManager defaultManager] stringWithFileSystemRepresentation:path length:strlen(path)];
+				NSString *parent = executable.stringByResolvingSymlinksInPath.stringByDeletingLastPathComponent;
+				directory = strdup(parent.UTF8String);
+			}
+			free(path);
+		}
+		return directory ?: "";
 	}
 }
 void captive_frame_begin(CaptiveHost *handle, uint32_t rgba)

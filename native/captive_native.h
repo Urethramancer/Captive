@@ -30,12 +30,12 @@ const char *captive_host_error(CaptiveHost *host);
 int32_t captive_host_pump(CaptiveHost *host);
 int32_t captive_host_event(CaptiveHost *host, CaptiveEvent *event);
 void captive_host_fullscreen(CaptiveHost *host);
+int32_t captive_host_is_fullscreen(CaptiveHost *host);
 double captive_mouse_x(CaptiveHost *host);
 double captive_mouse_y(CaptiveHost *host);
 /* Empty for a standalone executable; otherwise the app's Resources directory. */
 const char *captive_resources(void);
-/* Returns an empty string if cancelled. Copy before the next prompt call. */
-const char *captive_prompt(const char *title, const char *message, const char *initial);
+const char *captive_executable_directory(void);
 /* Begin/submit a complete retained frame. Logical coordinates use a top-left
  * origin. The whole 1280 x 800 canvas scales uniformly and is letterboxed. */
 void captive_frame_begin(CaptiveHost *host, uint32_t rgba);

@@ -40,11 +40,11 @@ double captive_meh_x(uint64_t h) { return h ? state(h)->event.x : 0; }
 double captive_meh_y(uint64_t h) { return h ? state(h)->event.y : 0; }
 const char *captive_meh_error(uint64_t h) { return captive_host_error(host(h)); }
 const char *captive_meh_resources(void) { return captive_resources(); }
-const char *captive_meh_prompt(const char *title, const char *message, const char *initial)
-{ return captive_prompt(title, message, initial); }
+const char *captive_meh_executable_directory(void) { return captive_executable_directory(); }
 double captive_meh_mouse_x(uint64_t h) { return captive_mouse_x(host(h)); }
 double captive_meh_mouse_y(uint64_t h) { return captive_mouse_y(host(h)); }
 void captive_meh_fullscreen(uint64_t h) { captive_host_fullscreen(host(h)); }
+int64_t captive_meh_is_fullscreen(uint64_t h) { return captive_host_is_fullscreen(host(h)); }
 void captive_meh_begin(uint64_t h, uint32_t rgba) { captive_frame_begin(host(h), rgba); }
 void captive_meh_rect(uint64_t h, double x, double y, double w, double height, uint32_t rgba)
 { captive_frame_rect(host(h), x, y, w, height, rgba); }

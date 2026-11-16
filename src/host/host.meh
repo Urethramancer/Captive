@@ -15,10 +15,11 @@ extern fn captive_meh_x(handle:uint64) float64
 extern fn captive_meh_y(handle:uint64) float64
 extern fn captive_meh_error(handle:uint64) string
 extern fn captive_meh_resources() string
-extern fn captive_meh_prompt(title:string, message:string, initial:string) string
+extern fn captive_meh_executable_directory() string
 extern fn captive_meh_mouse_x(handle:uint64) float64
 extern fn captive_meh_mouse_y(handle:uint64) float64
 extern fn captive_meh_fullscreen(handle:uint64)
+extern fn captive_meh_is_fullscreen(handle:uint64) int64
 extern fn captive_meh_begin(handle:uint64, rgba:uint32)
 extern fn captive_meh_rect(handle:uint64, x:float64, y:float64, w:float64, h:float64, rgba:uint32)
 extern fn captive_meh_text(handle:uint64, text:string, x:float64, y:float64, size:float64, rgba:uint32)
@@ -66,6 +67,7 @@ class Window
 	fn MouseY() float64 { ret captive_meh_mouse_y(self.handle) }
 	fn Error() string { ret captive_meh_error(self.handle) }
 	fn Fullscreen() { captive_meh_fullscreen(self.handle) }
+	fn IsFullscreen() bool { ret captive_meh_is_fullscreen(self.handle) != 0 }
 	fn Begin(rgba:uint32) { captive_meh_begin(self.handle, rgba) }
 	fn Rect(x:float64, y:float64, w:float64, h:float64, rgba:uint32) { captive_meh_rect(self.handle, x, y, w, h, rgba) }
 	fn Text(text:string, x:float64, y:float64, size:float64, rgba:uint32) { captive_meh_text(self.handle, text, x, y, size, rgba) }
@@ -86,5 +88,5 @@ class Window
 // ResourcePath is empty for a standalone executable and points inside an app bundle otherwise.
 fn ResourcePath() string { ret captive_meh_resources() }
 
-// Prompt asks for text on the main thread, returning an empty string on cancellation.
-fn Prompt(title:string, message:string, initial:string) string { ret captive_meh_prompt(title, message, initial) }
+// ExecutableDirectory resolves the executable location independently of the working directory.
+fn ExecutableDirectory() string { ret captive_meh_executable_directory() }

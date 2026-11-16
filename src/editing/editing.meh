@@ -1,0 +1,35 @@
+@mod editing
+
+// Field edits the game's ASCII names and computer passwords.
+class Field
+{
+	Kind:string
+	Droid:int64
+	Text:string
+	Caret:int64
+	Selected:bool
+	fn Begin(kind:string, droid:int64, text:string)
+	{
+		self.Kind=kind; self.Droid=droid; self.Text=text
+		self.Caret=len(text); self.Selected=true
+	}
+	// Input returns 1 to confirm, 2 to cancel, or 0 to continue editing.
+	fn Input(code:int64) int64
+	{
+		if code==13 { ret 1 }; if code==27 { ret 2 }
+		if code==1 { self.Selected=true; ret 0 }
+		if code==28 { if self.Selected { self.Caret=0 } else if self.Caret>0 { self.Caret-=1 }; self.Selected=false; ret 0 }
+		if code==29 { if self.Selected { self.Caret=len(self.Text) } else if self.Caret<len(self.Text) { self.Caret+=1 }; self.Selected=false; ret 0 }
+		if code==30 { self.Caret=0; self.Selected=false; ret 0 }
+		if code==31 { self.Caret=len(self.Text); self.Selected=false; ret 0 }
+		letter=(code>=48 and code<=57) or (code>=65 and code<=90) or (code>=97 and code<=122)
+		if !letter and code!=8 and code!=127 { ret 0 }
+		if self.Selected { self.Text=""; self.Caret=0; self.Selected=false }
+		if code==8 { if self.Caret>0 { self.Text=self.Text[:self.Caret-1]+self.Text[self.Caret:]; self.Caret-=1 }; ret 0 }
+		if code==127 { if self.Caret<len(self.Text) { self.Text=self.Text[:self.Caret]+self.Text[self.Caret+1:] }; ret 0 }
+		limit:int64=19; if self.Kind=="password" { limit=32 }
+		if len(self.Text)<limit { data:[]byte=[byte(code)]; self.Text=self.Text[:self.Caret]+str(data,0,1)+self.Text[self.Caret:]; self.Caret+=1 }
+		ret 0
+	}
+	fn Display() string { ret self.Text[:self.Caret]+"|"+self.Text[self.Caret:] }
+}

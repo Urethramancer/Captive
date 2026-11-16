@@ -17,13 +17,17 @@ panels, graphite reactor walls and green service panels. Their floor and ceiling
 tones match. `View.WallSets` and `ZoneHeight` configure this choice without
 changing topology or consuming gameplay randomness.
 
-Four droid panels remain visible. Click a name to lead, FRONT/REAR to swap rows,
+Four droid panels remain visible. Click a name to lead, double-click to rename
+inline, FRONT/REAR to swap rows,
 or right-click that field to swap columns. Click a hand to use it. F1–F4 open
 paginated inventories; left/right clicks equip the corresponding hand. Hovering
 items shows condition, ammunition and charge. Click a body-part bar facing a
 shop to repair it; SELL HELD sells the selected droid's left-hand clipboard.
 Facing a power socket and using a hand charges that droid. The displayed combat
 skill and unspecified rates remain provisional.
+The default party starts without prompts. Names and computer passwords are
+edited in the game view, with Enter to confirm, Escape to cancel and Command-A
+to select all. Simulation and audio pause during editing.
 
 Right-click another droid's name to transfer the selected inventory item.
 Right-click held equipment facing a shop to repair it. Stock shows each actual
@@ -71,5 +75,5 @@ failure. Replay advances only the transcript's ticks; normal play uses wall time
 
 Packaging embeds the current architecture's static Meh executable, local base,
 fixture and trap exports, generated art, comparison crops and verified original
-sound cues. It creates an internal ad-hoc-signed app, with no publishing,
-version numbers or release tags.
+sound cues. It creates an internal ad-hoc-signed app. The requested first
+release is version 0.1.0; packaging does not publish the app or create Git tags.
