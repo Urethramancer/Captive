@@ -13,6 +13,12 @@ assets were generated. Text is rendered by the application, never baked into
 the illustrations.
 
 `wall.png` is a straight-on wall module for projection by the renderer.
+`wall-reactor.png` uses heat-exchanger fins, dark cast metal and locking ports;
+`wall-service.png` uses green enamel, a braced hatch and an inspection window.
+These complementary materials vary the first base's three recovered sectors.
+Selection is stable in world coordinates and independent of gameplay randomness.
+Later bases should receive distinct architectural kits, floors, ceilings,
+lighting and fixture silhouettes through the configurable material set.
 `door.png` is an isolated bulkhead with transparency. `generator.png` retains
 the original sloped reactor silhouette and top connector; `terminal.png` and
 `droid.png` extend the same visual language.
