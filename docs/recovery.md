@@ -51,9 +51,9 @@ The [starting-game guide](https://captive.atari.org/Main/StartGame/StartGame.php
 
 ## Remaining verification
 
-The [original English manual](https://captive.atari.org/Main/ReleaseInfo/Manual/CaptiveManualEnglish.pdf) is available as scanned pages. The original MapGen hintbook provides complementary primary evidence. The actual Amiga game has not yet been played through alongside the export. Combat scheduling, wear calculations, generator countdown and full equipment behaviour remain unverified. Preserve raw fields and identify provisional numerical tuning clearly.
+The [original English manual](https://captive.atari.org/Main/ReleaseInfo/Manual/CaptiveManualEnglish.pdf) and original MapGen hintbook provide complementary primary evidence. The actual Amiga game has not yet been played through alongside the export. The recovered first-base interactions, equipment and original sabotage structure are implemented; exact numerical reproduction remains a separate fidelity task.
 
-A packaged app must not claim first-base acceptance until its entire progression, including these remaining interactions and save/resume, has been exercised against the recovered evidence.
+Provisional tuning includes the 60 Hz simulation with six ticks per original sabotage update, AI pacing, damage and shielding, equipment wear, movement and energy conversion, and ordinary equipment repair/resale formulas. Droid name-derived starting values are also provisional. Original topology, generated encounter data, weights, stock gates, purchase prices, quality masks, Ratt resale, endurance display conversion and root directions retain their verified values. The original 100/14 sabotage update counts are preserved without claiming an exact original frequency in seconds.
 
 ## Progression and interpretation
 
