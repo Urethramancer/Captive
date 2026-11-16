@@ -402,13 +402,14 @@ class View
 		for i=0; i<4; i+=1
 		{
 			left=24.0+float64(i)*310.0
-			if inside(mx,my,left+68.0,608.0,152.0,28.0) { hint=s.Droids[i].Name+" · Click to lead. Right-click to receive the selected inventory item." }
+			if inside(mx,my,left+68.0,608.0,152.0,28.0) { hint=s.Droids[i].Name+" · Click to lead. Double-click to rename. Right-click to receive an item." }
 			if inside(mx,my,left+220.0,608.0,82.0,28.0) { hint="Click FRONT/REAR to swap with the other row; right-click swaps left/right." }
 			if inside(mx,my,left,661.0,302.0,31.0) { hint="Body condition: head, chest, left/right arms, left/right legs. Click a part facing a shop to repair." }
 			if inside(mx,my,left,704.0,302.0,30.0) { hint="Click a hand to use it. Right-click held equipment while facing a shop to repair it." }
 		}
+		if self.Editor.Kind!="" { hint="Enter confirms · Escape cancels · Cmd+A selects all" }
+		if self.Editor.Kind=="name" { hint="Use 1–19 letters or digits · "+hint }
 		if hint!="" { w.Rect(20.0,764.0,1240.0,32.0,uint32(0x0a1715ff)); w.Text(hint,28.0,774.0,12.0,ink) }
-		if self.Editor.Kind!="" { w.Text("Enter saves · Escape cancels · Cmd+A selects all",28.0,774.0,12.0,amber) }
 		if self.Editor.Kind=="password"
 		{
 			w.Rect(216.0,234.0,544.0,156.0,uint32(0x061412ef))
