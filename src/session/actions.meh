@@ -40,7 +40,9 @@ fn collectAt(s:State,x:int64,y:int64) string,error
 				if i.Kind == "zlot" { i.Kind = "zlot-1.9"; i.Code = 54; i.Quality = (loot.Value>>13)&7; i.Condition = conditionPercent(loot.Value & 255); i.Ammunition = 0 }
 				if i.Kind == "clue" { i.Code = 102; i.Weight = 120 }
 				if i.Kind == "ball" { i.Code = 96; i.Weight = 23; i.Price = 10 }; if i.Kind == "explosives" { i.Code = 27; i.Weight = 433 }
+				if i.Kind == "probe" { i.Code = 97; i.Weight = 925 }
 				_,e = addInventory(d,i); if e != nil { ret "",e }
+				if i.Kind == "probe" { s.Probe = true; s.ProbeReleased = true }
 			}
 			loot.Collected = true; count += 1
 		}
@@ -58,11 +60,11 @@ fn Interact(s:State) string,error
 	cell = FrontCell(s)
 	if cell < 0 { ret "",error("world: map edge") }
 	if s.FixtureTypes[cell] == 0
-	{ if s.Sabotaged { ret "",error("socket: offline after sabotage") }; s.CursorCharge = 4200; append(s.SoundEvents,"charge"); ret "Leader hand charged; click spark to discharge",nil }
+	{ if s.SabotagePhase >= 2 { ret "",error("socket: offline after generator destruction") }; s.CursorCharge = 4200; append(s.SoundEvents,"charge"); ret "Leader hand charged; click spark to discharge",nil }
 	object = s.Objects[cell] & 127
 	if object == 0x15
 	{
-		if s.Sabotaged { ret "",error("door: controls disabled by sabotage") }
+		if s.SabotagePhase >= 2 { ret "",error("door: controls disabled by generator destruction") }
 		if s.DoorOpen[cell] == 0
 		{
 			// Base zero has button doors(type5) and blue doors(type0).
@@ -103,16 +105,15 @@ fn Interact(s:State) string,error
 		if d < 0 { ret "",error("generator: hold explosives in a droid hand") }
 		item = s.Droids[d].Inventory[i]; item.Quantity -= 1; s.Droids[d].Inventory[i] = item
 		for hand = 0; hand < 2; hand += 1 { if s.Droids[d].Hands[hand] == i { s.Droids[d].Hands[hand] = -1 } }
-		s.Sabotaged = true; s.SabotageTicks = 60*120
-		// Blue doors fail open; button doors retain their current state.
-		for at = 0; at < len(s.Objects); at += 1
-		{ if (s.Objects[at]&127) == 0x15 and ((s.Objects[at]>>8)&7) == 0 { s.DoorOpen[at] = -1 } }
+		s.Sabotaged = true; s.SabotagePhase = 1; s.SabotageCounter = 100; s.SabotageClock = 0
+		s.FireFront = cell; s.FireSteps = 0; s.SabotageTicks = 600
 		append(s.SoundEvents,"sabotage")
 		ret "Generators sabotaged — return to the entrance",nil
 	}
 	if object == 0x12 { ret "Shop: trade and repair",nil }
 	if object == 0x22
 	{
+		if s.SabotagePhase >= 2 { ret "",error("cupboard: locked after generator destruction") }
 		if s.TrapWall[cell] >= 0
 		{
 			wall = s.TrapWall[cell]; s.Tiles[wall] = 1; s.Objects[wall] = 7; s.TrapWall[cell] = -1
@@ -122,8 +123,7 @@ fn Interact(s:State) string,error
 	}
 	if cell == 30 and s.Width == 64
 	{
-		if !s.Probe or !s.Sabotaged { ret "",error("exit: recover the probe and sabotage the generators") }
-		if s.SabotageTicks <= 0 { ret "",error("exit: base destruction overtook the party") }
+		if !s.Probe or !HasProbe(s) or !s.Sabotaged { ret "",error("exit: recover the probe and sabotage the generators") }
 		s.Escaped = true; append(s.SoundEvents,"escape")
 		ret "Base destroyed; party escaped with the planet probe",nil
 	}
@@ -230,6 +230,7 @@ fn Action(s:State,kind:string,a:int64,b:int64) string,error
 	if kind == "spark" { ret Spark(s) }
 	if kind == "sell" { ret Sell(s,a,b) }
 	if kind == "buy" { ret Buy(s,a,b) }
+	if kind == "transfer" { if a < 0 { ret "",error("inventory: invalid source") }; ret Transfer(s,a/64,b,a%64) }
 	if kind == "use" { ret Use(s,a,b) }
 	if kind == "recharge-item" { ret RechargeItem(s,a,b) }
 	if kind == "repair-item" { ret RepairItem(s,a,b) }
@@ -243,7 +244,7 @@ fn Action(s:State,kind:string,a:int64,b:int64) string,error
 fn Charge(s:State,droid:int64) string,error
 {
 	cell = FrontCell(s)
-	if !canAct(s) or s.Sabotaged or cell < 0 or s.FixtureTypes[cell] != 0
+	if !canAct(s) or s.SabotagePhase >= 2 or cell < 0 or s.FixtureTypes[cell] != 0
 	{ ret "",error("socket: face an operational power socket") }
 	if droid < 0 or droid >= 4 { ret "",error("socket: invalid droid") }
 	if s.CursorCharge > 0 { ret "",error("socket: discharge the leader hand before moving the chest") }
@@ -302,11 +303,21 @@ fn EnterPassword(s:State,password:string) string,error
 {
 	cell = FrontCell(s)
 	if !canAct(s) or cell < 0 or (s.Objects[cell]&127) != 0x13 { ret "",error("computer: face the probe computer") }
-	if s.Sabotaged { ret "",error("computer: offline after sabotage") }
+	if s.SabotagePhase >= 2 { ret "",error("computer: offline after generator destruction") }
 	if strings.ToUpper(strings.Trim(password)) != "CHAESELUME" { ret "",error("computer: password rejected") }
-	if s.Probe { ret "Probe already recovered",nil }
-	i = new Item; i.Kind = "probe"; i.Condition = 100; i.Quantity = 1
-	_,e = addInventory(s.Droids[s.Leader],i); if e != nil { ret "",e }
-	s.Probe = true; append(s.SoundEvents,"computer")
-	ret "Password accepted; planet probe recovered",nil
+	if s.ProbeReleased
+	{ if s.Probe { ret "Probe already recovered",nil }; ret "",error("computer: probe already released; recover it or restore the base-entry checkpoint") }
+	i = new Item; i.Kind = "probe"; i.Code = 97; i.Weight = 925; i.Condition = 100; i.Quantity = 1
+	s.ProbeReleased = true; append(s.SoundEvents,"computer")
+	if s.CursorCharge == 0
+	{ _,e = addInventory(s.Droids[s.Leader],i); if e == nil { s.Probe = true; ret "Password accepted; planet probe recovered",nil } }
+	loot = new Loot; loot.Kind = "probe"; loot.X = s.X; loot.Y = s.Y; append(s.Loot,loot)
+	ret "Probe released on the floor; discharge the leader hand before collecting it",nil
+}
+
+// HasProbe checks current ownership; a released but destroyed probe cannot escape.
+fn HasProbe(s:State) bool
+{
+	for d = s.Droids { for i = d.Inventory { if i.Kind == "probe" and i.Quantity > 0 { ret true } } }
+	ret false
 }

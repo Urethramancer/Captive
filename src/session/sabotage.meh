@@ -1,0 +1,65 @@
+@mod session
+
+// The original arms for100 updates and then advances fire every14 updates.
+// Six60Hz simulation ticks per original update is provisional replay tuning.
+fn advanceSabotage(s:State)
+{
+	if !s.Sabotaged or s.SabotagePhase < 1 or s.SabotagePhase > 2 { ret }
+	s.SabotageClock += 1
+	s.SabotageTicks = s.SabotageCounter*6-s.SabotageClock
+	if s.SabotageTicks < 0 { s.SabotageTicks = 0 }
+	if s.SabotageClock < 6 { ret }
+	s.SabotageClock = 0; s.SabotageCounter -= 1
+	if s.SabotageCounter > 0 { ret }
+	if s.SabotagePhase == 1
+	{
+		s.SabotagePhase = 2; shutdownBase(s)
+		s.SabotageCounter = 14; s.SabotageTicks = 84
+		append(s.SoundEvents,"explosion")
+		ret
+	}
+	if s.FireFront < 0 or s.FireFront >= s.Width*s.Height
+	{ s.SabotagePhase = 3; s.SabotageTicks = 0; ret }
+	direction = (s.Details[s.FireFront]>>8)&3
+	dx:[]int64 = [0,-1,0,1]; dy:[]int64 = [-1,0,1,0]
+	x = s.FireFront%s.Width+dx[direction]; y = s.FireFront/s.Width+dy[direction]
+	if x < 0 or x >= s.Width or y < 0 or y >= s.Height or s.FireSteps >= s.Width*s.Height
+	{ s.SabotagePhase = 3; s.SabotageTicks = 0; ret }
+	s.FireFront = y*s.Width+x; s.FireSteps += 1; igniteCross(s,s.FireFront)
+	s.SabotageCounter = 14; s.SabotageTicks = 84
+	append(s.SoundEvents,"explosion")
+}
+fn igniteCross(s:State,at:int64)
+{
+	if at < 0 or at >= s.Width*s.Height { ret }
+	dx:[]int64 = [0,0,1,0,-1]; dy:[]int64 = [0,-1,0,1,0]
+	for index = 0; index < 5; index += 1
+	{
+		x = at%s.Width+dx[index]; y = at/s.Width+dy[index]
+		if x < 0 or x >= s.Width or y < 0 or y >= s.Height { continue }
+		cell = y*s.Width+x
+		s.Fire[cell] = 1; s.Tiles[cell] = 1; s.Objects[cell] = (s.Objects[cell]&128)|7
+		s.FixtureTypes[cell] = -1; s.FixtureExtra[cell] = 0; s.TrapWall[cell] = -1; s.DoorOpen[cell] = 0
+		DetonateMine(s,cell)
+	}
+}
+fn shutdownBase(s:State)
+{
+	for at = 0; at < len(s.Objects); at += 1
+	{ if (s.Objects[at]&127) == 0x15 and ((s.Objects[at]>>8)&7) == 0 { s.DoorOpen[at] = -1 } }
+}
+
+// Blinded is corrected by the purchased Visor, rather than a free rendering aid.
+fn Blinded(s:State) bool { ret s.BlindTicks > 0 and !HasEquipment(s,"optic",7) }
+fn applyFire(s:State)
+{
+	if s.Escaped or s.Fire[s.Y*s.Width+s.X] == 0 or Ceiling(s) { ret }
+	if !HasEquipment(s,"optic",7) { s.BlindTicks = 90 }
+	if s.Ticks%60 != 0 { ret }
+	for d = s.Droids
+	{
+		part = NextRandom(s,6); d.Parts[part] -= Protect(s,10,"fire")
+		if d.Parts[part] < 0 { d.Parts[part] = 0 }
+	}
+	append(s.SoundEvents,"fire")
+}

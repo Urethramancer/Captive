@@ -3,7 +3,7 @@
 fn atShop(s:State) bool
 {
 	cell = FrontCell(s)
-	ret cell >= 0 and (s.Objects[cell]&127) == 0x12 and canAct(s) and !s.Sabotaged
+	ret cell >= 0 and (s.Objects[cell]&127) == 0x12 and canAct(s)
 }
 
 // Repair restores a body part at an original shop. The price of one gold per

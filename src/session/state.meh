@@ -64,9 +64,17 @@ class State
 	Width:int64
 	Height:int64
 	Probe:bool
+	ProbeReleased:bool
 	Sabotaged:bool
 	Escaped:bool
 	SabotageTicks:int64
+	SabotagePhase:int64
+	SabotageCounter:int64
+	SabotageClock:int64
+	FireFront:int64
+	FireSteps:int64
+	Fire:[]int64
+	BlindTicks:int64
 	CursorCharge:int64
 	EnergySteps:int64
 }
@@ -93,6 +101,7 @@ fn New(width:int64, height:int64, tiles:[]int64, x:int64, y:int64, seed:int64) S
 	s.Tiles = new([]int64)
 	for tile = tiles { append(s.Tiles, tile); append(s.Terrain,tile); append(s.Objects,0); append(s.Details,0) }
 	s.Visited = new([]int64); for tile = tiles { append(s.Visited,0) }; s.Visited[y*width+x] = 1
+	s.Fire = new([]int64); s.FireFront = -1; for at = 0; at < len(tiles); at += 1 { append(s.Fire,0) }
 	s.Cameras = new([]RemoteCamera); s.CameraIndex = -1
 	s.Balls = new([]BouncingBall); s.Mines = new([]int64); for at = 0; at < len(tiles); at += 1 { append(s.Mines,0) }
 	s.Offers = new([]Offer); s.Enemies = new([]Enemy); s.Loot = new([]Loot); s.DoorOpen = new([]int64); s.SoundEvents = new([]string)
@@ -187,7 +196,8 @@ fn Tick(s:State)
 		for hand = 0; hand < 2; hand += 1
 		{ if d.Cooldowns[hand] > 0 { d.Cooldowns[hand] -= 1 } }
 	}
-	if s.Sabotaged and s.SabotageTicks > 0 { s.SabotageTicks -= 1 }
+	if s.BlindTicks > 0 { s.BlindTicks -= 1 }
+	advanceSabotage(s); applyFire(s)
 	advanceWorld(s); advanceEquipment(s); advanceBalls(s); if s.Ticks%60 == 0 { pruneWorld(s) }
 }
 

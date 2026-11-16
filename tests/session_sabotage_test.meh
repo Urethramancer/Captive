@@ -1,0 +1,96 @@
+@inc test
+@inc src/session
+
+fn demolitionParty() session.State
+{
+	floors:[]int64 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+	s,e = session.New(5,5,floors,2,2,23)
+	if e != nil { eprintln(e.str()); exit(1) }
+	s.Objects[7] = 9; s.Objects[24] = 0x0815
+	s.Details[7] = 0x0200; s.Details[12] = 0x0100
+	s.Tiles[13] = 0; s.Objects[13] = 0x12; s.FixtureTypes[13] = 0
+	item = new session.Item; item.Kind = "explosives"; item.Condition = 100; item.Quantity = 1
+	append(s.Droids[0].Inventory,item); s.Droids[0].Hands[0] = 0
+	_,e = session.Interact(s)
+	if e != nil { eprintln(e.str()); exit(1) }
+	ret s
+}
+
+fn testOriginalSabotageScheduleAndRootWave(t:test.Tester)
+{
+	s = demolitionParty()
+	t.equal(s.SabotageCounter,100,"original arming update count")
+	t.equal(s.SabotagePhase,1,"arming phase begins")
+	for tick = 0; tick < 599; tick += 1 { session.Tick(s); session.DrainSounds(s) }
+	t.equal(s.SabotagePhase,1,"no premature generator destruction")
+	t.equal(s.Fire[7],0,"no fire before original delay")
+	t.equal(s.DoorOpen[24],0,"blue door remains closed during arming")
+	session.Tick(s)
+	t.equal(s.SabotagePhase,2,"100th original update begins destruction")
+	t.equal(s.DoorOpen[24],-1,"blue doors fail open at generator destruction")
+	t.equal(s.SabotageCounter,14,"original wave update interval")
+	t.equal(s.Fire[7],0,"phase switch does not ignite before first root step")
+	for tick = 0; tick < 83; tick += 1 { session.Tick(s); session.DrainSounds(s) }
+	t.equal(s.FireSteps,0,"no early root-path step")
+	session.Tick(s)
+	t.equal(s.FireSteps,1,"14th original update advances wave")
+	t.equal(s.FireFront,12,"wave follows recovered south root direction")
+	t.equal(s.Fire[12],1,"cross centre ignites")
+	t.equal(s.Fire[11],1,"cross extends west"); t.equal(s.Fire[13],1,"cross extends east")
+	t.equal(s.Fire[7],1,"cross extends north"); t.equal(s.Fire[17],1,"cross extends south")
+	t.equal(s.Tiles[13],1,"fire overwrites wall collision")
+	t.equal(s.FixtureTypes[13],-1,"fire destroys socket fixture")
+	t.equal(s.Objects[13],7,"fire clears underlying blocked object")
+}
+
+fn testActiveWaveSavePauseAndVisor(t:test.Tester)
+{
+	s = demolitionParty()
+	for tick = 0; tick < 701; tick += 1 { session.Tick(s); session.DrainSounds(s) }
+	t.equal(s.SabotagePhase,2,"active fire wave fixture")
+	t.equal(s.SabotageClock,5,"save between original updates")
+	loaded,e = session.Decode(session.Encode(s)); t.expect(e == nil,"active wave saves")
+	if e != nil { ret }
+	t.equalStr(session.Encode(s),session.Encode(loaded),"wave phase/front/fire/timers retained")
+	s.Paused = true; before = session.Encode(s)
+	for tick = 0; tick < 120; tick += 1 { session.Tick(s) }
+	t.equalStr(session.Encode(s),before,"pause freezes all active wave counters")
+	s.Paused = false
+	for tick = 0; tick < 400; tick += 1
+	{ session.Tick(s); session.Tick(loaded); session.DrainSounds(s); session.DrainSounds(loaded) }
+	t.equalStr(session.Encode(s),session.Encode(loaded),"active fire and random damage continue identically")
+	t.expect(session.Blinded(s),"contact fire blinds unprotected view")
+	visor = new session.Item; visor.Kind = "optic"; visor.Quality = 7; visor.Enabled = true; visor.Quantity = 1; visor.Condition = 100
+	append(s.Droids[3].Inventory,visor)
+	t.expect(!session.Blinded(s),"powered Visor corrects fire blindness")
+}
+
+fn testInventoryTransferIsOwnedAndAtomic(t:test.Tester)
+{
+	s = demolitionParty(); item = new session.Item
+	item.Kind = "battery"; item.Quality = 2; item.Charge = 75; item.Condition = 100; item.Quantity = 1; item.Weight = 23
+	append(s.Droids[0].Inventory,item)
+	_,e = session.Transfer(s,0,1,1); t.expect(e == nil,"transfer actual owned item")
+	t.equal(s.Droids[0].Inventory[1].Quantity,0,"source item consumed")
+	t.equal(s.Droids[1].Inventory[0].Charge,75,"battery charge preserved")
+	t.equal(s.Droids[1].Inventory[0].Quality,2,"equipment quality preserved")
+	before = session.Encode(s)
+	_,e = session.Transfer(s,0,1,1); t.expect(e != nil,"cannot duplicate transferred item")
+	t.equalStr(session.Encode(s),before,"invalid transfer changes no state")
+}
+
+fn testDestroyedProbeCannotBeDuplicated(t:test.Tester)
+{
+	s = demolitionParty(); s.Objects[7] = 0x13
+	_,e = session.EnterPassword(s,"chaeselume"); t.expect(e == nil,"remembered password releases probe")
+	t.expect(s.Probe and s.ProbeReleased and session.HasProbe(s),"probe ownership recorded")
+	s.CursorCharge = 4200
+	index:int64 = -1
+	for at = 0; at < len(s.Droids[0].Inventory); at += 1 { if s.Droids[0].Inventory[at].Kind == "probe" { index = at } }
+	_,e = session.Use(s,0,index); t.expect(e == nil,"charged cursor destroys probe")
+	t.expect(!s.Probe and !session.HasProbe(s),"destroyed probe no longer carried")
+	t.expect(s.ProbeReleased,"computer release remains permanent")
+	s.CursorCharge = 0
+	_,e = session.EnterPassword(s,"CHAESELUME"); t.expect(e != nil,"computer cannot duplicate lost probe")
+	_,e = session.Decode(session.Encode(s)); t.expect(e == nil,"lost-probe failure state saves consistently")
+}

@@ -64,8 +64,9 @@ fn testShopSocketAndHeldExplosives(t:test.Tester)
 	t.expect(s.Sabotaged,"actual held explosives starts countdown")
 	t.equal(s.Droids[0].Inventory[0].Quantity,0,"explosives consumed")
 	_,e = session.Decode(session.Encode(s)); t.expect(e == nil,"consumed inventory survives save")
+	for tick = 0; tick < 600; tick += 1 { session.Tick(s) }
 	s.Objects[1] = 0x13
-	_,e = session.Interact(s); t.expect(e != nil,"computer offline after sabotage")
+	_,e = session.Interact(s); t.expect(e != nil,"computer offline after original arming delay")
 }
 
 fn testCupboardTrapAndProbeAccess(t:test.Tester)

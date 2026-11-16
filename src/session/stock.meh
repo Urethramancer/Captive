@@ -49,7 +49,7 @@ fn LoadStock(s:State,text:string) error
 // SupportedOffer prevents selling any item whose behaviour is not implemented.
 fn SupportedOffer(o:Offer) bool
 {
-	ret o.Kind == "battery" or o.Kind == "explosives" or o.Kind == "ball" or o.Kind == "mine" or o.Kind == "camera" or (o.Kind == "optic" and o.Quality <= 5) or (o.Kind == "device") or (o.Kind == "weapon" and (o.Code == 31 or o.Code == 32))
+	ret o.Kind == "battery" or o.Kind == "explosives" or o.Kind == "ammo" or o.Kind == "ball" or o.Kind == "mine" or o.Kind == "camera" or (o.Kind == "optic") or (o.Kind == "device") or (o.Kind == "weapon" and (o.Code == 31 or o.Code == 32))
 }
 
 // Buy purchases a real catalogue row from the shop directly ahead.
@@ -66,6 +66,8 @@ fn Buy(s:State,droid:int64,row:int64) string,error
 	i = new Item; i.Code = o.Code; i.Kind = o.Kind; i.Quality = o.Quality; i.Price = o.Price; i.Weight = o.ItemData
 	i.Condition = 100; i.Quantity = 1
 	if o.Kind == "battery" { i.Charge = 25 }
+	if o.Kind == "ammo"
+	{ counts:[]int64 = [30,34,40,42,39,46,50,15,20,20,25]; if o.Code >= 77 and o.Code <= 87 { i.Ammunition = counts[o.Code-77] } }
 	_,e = addInventory(d,i); if e != nil { ret "",e }; s.Credits -= o.Price; append(s.SoundEvents,"shop")
 	ret format("Purchased {} for {} gold",o.Name,o.Price),nil
 }

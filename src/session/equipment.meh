@@ -19,11 +19,13 @@ fn Use(s:State,droid:int64,index:int64) string,error
 	if item.Quantity == 0 { ret "",error("equipment: item has been consumed") }
 	if s.CursorCharge > 0
 	{
+		if item.Kind == "probe" { s.Probe = false }
 		item.Quantity = 0; item.Enabled = false; d.Inventory[index] = item
 		for hand = 0; hand < 2; hand += 1 { if d.Hands[hand] == index { d.Hands[hand] = -1 } }
 		append(s.SoundEvents,"explosion")
 		ret "Charged leader hand destroyed the item",nil
 	}
+	if item.Kind == "ammo" { ret "",error("ammunition: a compatible firearm is required; none are stocked in this base") }
 	if item.Kind == "battery"
 	{
 		if item.Charge < 25 { ret "",error("battery: recharge at a power socket") }
@@ -72,7 +74,7 @@ fn Use(s:State,droid:int64,index:int64) string,error
 fn RechargeItem(s:State,droid:int64,index:int64) string,error
 {
 	cell = FrontCell(s)
-	if !canAct(s) or s.Sabotaged or cell < 0 or s.FixtureTypes[cell] != 0
+	if !canAct(s) or s.SabotagePhase >= 2 or cell < 0 or s.FixtureTypes[cell] != 0
 	{ ret "",error("socket: face an operational power socket") }
 	if droid < 0 or droid >= 4 or index < 0 or index >= len(s.Droids[droid].Inventory)
 	{ ret "",error("socket: invalid inventory selection") }
@@ -98,4 +100,20 @@ fn RepairItem(s:State,droid:int64,index:int64) string,error
 	i.Condition = 100; s.Droids[droid].Inventory[index] = i; s.Credits -= cost
 	append(s.SoundEvents,"shop")
 	ret format("Equipment repaired for {} gold",cost),nil
+}
+
+// Transfer moves an owned item between droids without duplicating equipment.
+fn Transfer(s:State,source:int64,target:int64,index:int64) string,error
+{
+	if !canAct(s) or source < 0 or source >= 4 or target < 0 or target >= 4 or source == target
+	{ ret "",error("inventory: choose two different droids") }
+	from = s.Droids[source]; to = s.Droids[target]
+	if index < 0 or index >= len(from.Inventory) or from.Inventory[index].Quantity <= 0
+	{ ret "",error("inventory: invalid item") }
+	if s.CursorCharge > 0 { ret Use(s,source,index) }
+	i = from.Inventory[index]; i.Enabled = false
+	_,e = addInventory(to,i); if e != nil { ret "",e }
+	i.Quantity = 0; from.Inventory[index] = i
+	for hand = 0; hand < 2; hand += 1 { if from.Hands[hand] == index { from.Hands[hand] = -1 } }
+	ret "Item transferred",nil
 }

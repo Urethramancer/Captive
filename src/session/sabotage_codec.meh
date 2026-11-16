@@ -1,0 +1,28 @@
+@mod session
+@inc json
+
+fn encodeSabotage(s:State,o:json.JsonValue)
+{
+	setNumber(o,"sabotagePhase",s.SabotagePhase); setNumber(o,"sabotageCounter",s.SabotageCounter)
+	setNumber(o,"sabotageClock",s.SabotageClock); setNumber(o,"fireFront",s.FireFront)
+	setNumber(o,"fireSteps",s.FireSteps); setNumber(o,"blindTicks",s.BlindTicks)
+	o.Set("fire",integers(s.Fire))
+}
+fn decodeSabotage(s:State,o:json.JsonValue) error
+{
+	phase,e = number(o.Get("sabotagePhase"),0,3); if e != nil { ret e }; s.SabotagePhase = phase
+	counter,e = number(o.Get("sabotageCounter"),0,100); if e != nil { ret e }; s.SabotageCounter = counter
+	clock,e = number(o.Get("sabotageClock"),0,5); if e != nil { ret e }; s.SabotageClock = clock
+	front,e = number(o.Get("fireFront"),-1,s.Width*s.Height-1); if e != nil { ret e }; s.FireFront = front
+	steps,e = number(o.Get("fireSteps"),0,s.Width*s.Height); if e != nil { ret e }; s.FireSteps = steps
+	blind,e = number(o.Get("blindTicks"),0,90); if e != nil { ret e }; s.BlindTicks = blind
+	fire,e = numbers(o.Get("fire"),s.Width*s.Height,0,1); if e != nil { ret e }; s.Fire = fire
+	if (phase > 0 and !s.Sabotaged) or (s.Sabotaged and phase == 0) { ret error("session save: inconsistent sabotage phase") }
+	if phase == 1 or phase == 2
+	{
+		if counter < 1 or front < 0 or s.SabotageTicks != counter*6-clock
+		{ ret error("session save: inconsistent active sabotage timer") }
+		if phase == 2 and counter > 14 { ret error("session save: invalid fire-wave timer") }
+	}
+	ret nil
+}

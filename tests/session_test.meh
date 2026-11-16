@@ -60,7 +60,7 @@ fn testFormationLeadershipAndEquipment(t:test.Tester)
 
 fn testPauseFreezesSimulationAndActions(t:test.Tester)
 {
-	s = party(); s.Sabotaged = true; s.SabotageTicks = 30
+	s = party(); s.Sabotaged = true; s.SabotageTicks = 30; s.SabotagePhase = 1; s.SabotageCounter = 5; s.FireFront = 0
 	s.Droids[0].Cooldowns[0] = 4
 	session.Tick(s)
 	t.equal(s.Ticks,1,"fixed tick")
@@ -81,7 +81,8 @@ fn testSaveContinuation(t:test.Tester)
 	item.Kind = "test tool"; item.Condition = 83; item.Charge = 9; item.Ammunition = 4; item.Quantity = 1
 	append(s.Droids[2].Inventory,item); s.Droids[2].Hands[1] = 0
 	s.Droids[2].Cooldowns[1] = 5; s.Droids[2].Skills[0] = 7
-	s.Sabotaged = true; s.Probe = true; s.SabotageTicks = 100; s.Credits = 123
+	s.Sabotaged = true; s.Probe = true; s.ProbeReleased = true; s.SabotageTicks = 600; s.SabotagePhase = 1; s.SabotageCounter = 100; s.FireFront = 0; s.Credits = 123
+	probe = new session.Item; probe.Kind = "probe"; probe.Quantity = 1; probe.Condition = 100; append(s.Droids[0].Inventory,probe)
 	session.NextRandom(s,50)
 	encoded = session.Encode(s)
 	loaded,e = session.Decode(encoded); t.expect(e == nil,"valid save accepted")

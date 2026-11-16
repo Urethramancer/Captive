@@ -20,7 +20,7 @@ fn Encode(s:State) string
 	setNumber(o,"ticks",s.Ticks); setNumber(o,"rng",s.Rng); setNumber(o,"leader",s.Leader)
 	setNumber(o,"width",s.Width); setNumber(o,"height",s.Height); setNumber(o,"credits",s.Credits)
 	setNumber(o,"sabotageTicks",s.SabotageTicks); setNumber(o,"cursorCharge",s.CursorCharge); setNumber(o,"energySteps",s.EnergySteps); setNumber(o,"moveTimer",s.MoveTimer); o.Set("visited",integers(s.Visited))
-	o.Set("paused",json.NewBool(s.Paused)); o.Set("probe",json.NewBool(s.Probe))
+	o.Set("paused",json.NewBool(s.Paused)); o.Set("probe",json.NewBool(s.Probe)); o.Set("probeReleased",json.NewBool(s.ProbeReleased))
 	o.Set("sabotaged",json.NewBool(s.Sabotaged)); o.Set("escaped",json.NewBool(s.Escaped))
 	o.Set("tiles",integers(s.Tiles)); o.Set("formation",integers(s.Formation))
 	droids = json.NewArray()
@@ -41,7 +41,7 @@ fn Encode(s:State) string
 		v.Set("inventory",items); droids.Append(v)
 	}
 	o.Set("droids",droids)
-	encodeWorld(s,o); encodeCatalogue(s,o); encodeProjectiles(s,o); encodeCameras(s,o)
+	encodeWorld(s,o); encodeCatalogue(s,o); encodeProjectiles(s,o); encodeCameras(s,o); encodeSabotage(s,o)
 	ret json.Marshal(o)
 }
 
@@ -103,9 +103,9 @@ fn Decode(text:string) State,error
 	steps,e = number(o.Get("energySteps"),0,9); if e != nil { ret nil,e }; s.EnergySteps = steps
 	moveTimer,e = number(o.Get("moveTimer"),0,120); if e != nil { ret nil,e }; s.MoveTimer = moveTimer
 	visited,e = numbers(o.Get("visited"),s.Width*s.Height,0,1); if e != nil { ret nil,e }; s.Visited = visited
-	for key = ["paused","probe","sabotaged","escaped"]
+	for key = ["paused","probe","probeReleased","sabotaged","escaped"]
 	{ if !o.Get(key).IsBool() { ret nil,error("session save: missing boolean") } }
-	s.Paused = o.Get("paused").Bool(); s.Probe = o.Get("probe").Bool()
+	s.Paused = o.Get("paused").Bool(); s.Probe = o.Get("probe").Bool(); s.ProbeReleased = o.Get("probeReleased").Bool()
 	s.Sabotaged = o.Get("sabotaged").Bool(); s.Escaped = o.Get("escaped").Bool()
 	if s.Escaped and (!s.Probe or !s.Sabotaged) { ret nil,error("session save: invalid escape progression") }
 	valueFormation,e = numbers(o.Get("formation"),4,0,3); if e != nil { ret nil,e }
@@ -162,6 +162,8 @@ fn Decode(text:string) State,error
 	e = decodeCatalogue(s,o); if e != nil { ret nil,e }
 	e = decodeProjectiles(s,o); if e != nil { ret nil,e }
 	e = decodeCameras(s,o); if e != nil { ret nil,e }
+	e = decodeSabotage(s,o); if e != nil { ret nil,e }
+	if HasProbe(s) != s.Probe or (s.Probe and !s.ProbeReleased) { ret nil,error("session save: inconsistent probe ownership") }
 	ret s,nil
 }
 
