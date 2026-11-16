@@ -13,3 +13,8 @@
 .meh-cache/
 /captive
 /rnc-inspect
+/rnc-extract
+/assets-inspect
+/native-smoke
+/audio-export
+/base-playthrough

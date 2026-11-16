@@ -1,0 +1,11 @@
+@inc mehk
+
+fn targets()
+{
+	p = mehk.Project("local/captive")
+	p.Directory(".build")
+	g = p.Binary("captive")
+	g.Source("main.meh")
+	g.LinkFlags("release", ".build/native/libcaptive_native.a")
+	mehk.AddProject(p)
+}
