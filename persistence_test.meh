@@ -66,10 +66,17 @@ fn testDeterministicDiskContinuation(t:test.Tester)
 	if e != nil { ret }
 	f.close()
 	defer os.Remove(path)
-	s, e = session.New(1, 1, [1], 0, 0, 91)
+	s, e = session.New(1, 2, [1,1], 0, 0, 91)
 	t.expect(e == nil, "create session")
+	s.Facing=2; s.Objects[1]=9
+	explosives=new session.Item
+	explosives.Kind="explosives"; explosives.Code=27; explosives.Condition=100; explosives.Quantity=1
+	append(s.Droids[0].Inventory,explosives)
+	e=session.Equip(s,0,1,0)
+	t.expect(e==nil,"hold actual explosives")
+	_,e=session.Interact(s)
+	t.expect(e==nil,"start sabotage through the normal action")
 	s.Droids[1].Cooldowns[0] = 70
-	s.Sabotaged = true; s.SabotageTicks = 240
 	for i = 0; i < 23; i += 1 { session.Tick(s); session.NextRandom(s, 17) }
 	e = persistence.Save(path, session.Encode(s))
 	t.expect(e == nil, "save active timers and RNG")
