@@ -24,3 +24,10 @@ Old/new format detection is structurally ambiguous because both have the
 same signature. Complete old streams must consume their packed payload;
 modern streams verify both CRCs. Original output remains original game data,
 not newly licensed project code.
+
+Verification: all thirty supplied RNC1 resources decoded successfully and
+matched byte-for-byte against independently built upstream Ancient commit
+`1491a35a2c49a97e77757e744e7ed6e4fe5e6bab` (`ancient decompress`, followed by
+`cmp`). The synthetic suite passes 52 checks, including old/new overlapping
+back references, known CRC vector, corrupted CRC fields, truncation of every
+fixture prefix, invalid references and excessive allocation bounds.
