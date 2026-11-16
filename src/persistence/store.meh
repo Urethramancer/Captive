@@ -1,0 +1,91 @@
+@mod persistence
+@inc os
+@inc json
+@inc crypto
+
+const MaxPayload:int64 = 1024 * 1024
+const magic:string = "CAPTIVE-SAVE-1\n"
+
+fn digest(text:string) string
+{
+	data = crypto.SHA256(strbytes(text))
+	hex = "0123456789abcdef"
+	result = ""
+	for i = 0; i < len(data); i += 1
+	{
+		b = int64(data[i])
+		hi = b >> 4
+		lo = b & 15
+		result += hex[hi:hi + 1]
+		result += hex[lo:lo + 1]
+	}
+	ret result
+}
+
+fn validate(payload:string) error
+{
+	if len(payload) < 2 or len(payload) > MaxPayload
+	{ ret error("save: invalid payload size") }
+	value, e = json.Parse(payload)
+	if e != nil { ret error("save: invalid JSON payload") }
+	if !value.IsObject() { ret error("save: payload must be an object") }
+	ret nil
+}
+
+// Save atomically replaces a save using a private temporary file in its directory.
+// The caller owns session-schema validation; this layer checks size and integrity.
+fn Save(path:string, payload:string) error
+{
+	e = validate(payload)
+	if e != nil { ret e }
+	file, temporary, createError = os.CreateTemp(os.Dir(path), ".captive-save-*", 0o600)
+	if createError != nil { ret createError }
+	defer os.Remove(temporary)
+	defer file.close()
+	encoded = magic + digest(payload) + "\n" + payload
+	offset:int64 = 0
+	for offset < len(encoded)
+	{
+		count, writeError = file.writeStr(encoded[offset:])
+		if writeError != nil { ret writeError }
+		if count <= 0 { ret error("save: write made no progress") }
+		offset += count
+	}
+	e = file.flush()
+	if e != nil { ret e }
+	e = file.close()
+	if e != nil { ret e }
+	ret os.Rename(temporary, path)
+}
+
+// Load reads a bounded checksummed snapshot without changing the current session.
+// Decode and validate the returned payload before replacing the active session.
+fn Load(path:string) string, error
+{
+	file, openError = os.Open(path, "r")
+	if openError != nil { ret "", openError }
+	defer file.close()
+	info, statError = file.StatInfo()
+	if statError != nil { ret "", statError }
+	if info.Size > MaxPayload + len(magic) + 65
+	{ ret "", error("save: file exceeds size limit") }
+	// Read through the same descriptor, rejecting growth after the size check.
+	encoded = ""
+	for len(encoded) <= MaxPayload + len(magic) + 65
+	{
+		chunk, readError = file.readStr(4096)
+		if readError != nil { ret "", readError }
+		if len(chunk) == 0 { break }
+		encoded += chunk
+	}
+	if len(encoded) > MaxPayload + len(magic) + 65 or len(encoded) < len(magic) + 67
+	{ ret "", error("save: invalid file size") }
+	if encoded[:len(magic)] != magic or encoded[len(magic) + 64:len(magic) + 65] != "\n"
+	{ ret "", error("save: unsupported or corrupt header") }
+	payload = encoded[len(magic) + 65:]
+	if encoded[len(magic):len(magic) + 64] != digest(payload)
+	{ ret "", error("save: checksum mismatch") }
+	e = validate(payload)
+	if e != nil { ret "", e }
+	ret payload, nil
+}

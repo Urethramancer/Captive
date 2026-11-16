@@ -1,0 +1,89 @@
+@inc test
+@inc os
+@inc ./src/persistence
+@inc ./src/session
+
+fn testAtomicSaveRoundtripAndRejection(t:test.Tester)
+{
+	f, path, e = os.CreateTemp("/tmp", "captive-save-test-*", 0o600)
+	t.expect(e == nil, "create isolated save")
+	if e != nil { ret }
+	f.close()
+	defer os.Remove(path)
+	payload = "{\"ticks\":742,\"rng\":12345,\"name\":\"Ørn\",\"timers\":[3,7]}"
+	e = persistence.Save(path, payload)
+	t.expect(e == nil, "save valid state")
+	loaded, e = persistence.Load(path)
+	t.expect(e == nil, "load checksummed state")
+	t.equalStr(loaded, payload, "preserve exact state bytes")
+	invalid:[]string = ["", "null", "[]", "{", "{\"value\":NaN}"]
+	for i = 0; i < len(invalid); i += 1
+	{
+		e = persistence.Save(path, invalid[i])
+		t.expect(e != nil, "reject invalid save payload")
+		loaded, e = persistence.Load(path)
+		t.expect(e == nil, "previous save remains readable")
+		t.equalStr(loaded, payload, "failed save preserves previous snapshot")
+	}
+}
+
+fn testSaveCorruptionAndTruncation(t:test.Tester)
+{
+	f, path, e = os.CreateTemp("/tmp", "captive-corrupt-test-*", 0o600)
+	t.expect(e == nil, "create isolated save")
+	if e != nil { ret }
+	f.close()
+	defer os.Remove(path)
+	e = persistence.Save(path, "{\"ticks\":123}")
+	t.expect(e == nil, "save valid state")
+	good, e = os.Readfile(path)
+	t.expect(e == nil, "read snapshot")
+	for size = 0; size < len(good); size += 1
+	{
+		e = os.Writefile(path, good[:size])
+		t.expect(e == nil, "write truncated fixture")
+		payload, loadError = persistence.Load(path)
+		t.expect(loadError != nil, "reject every truncation")
+		t.equalStr(payload, "", "never return partial state")
+	}
+	corrupt:[]string = ["X" + good[1:], good[:20] + "z" + good[21:], good[:len(good) - 2] + "9}", good + " "]
+	for i = 0; i < len(corrupt); i += 1
+	{
+		e = os.Writefile(path, corrupt[i])
+		t.expect(e == nil, "write corrupt fixture")
+		payload, loadError = persistence.Load(path)
+		t.expect(loadError != nil, "reject corrupt header or payload")
+		t.equalStr(payload, "", "corrupt state unavailable")
+	}
+}
+
+fn testDeterministicDiskContinuation(t:test.Tester)
+{
+	f, path, e = os.CreateTemp("/tmp", "captive-continuation-*", 0o600)
+	t.expect(e == nil, "create continuation save")
+	if e != nil { ret }
+	f.close()
+	defer os.Remove(path)
+	s, e = session.New(1, 1, [1], 0, 0, 91)
+	t.expect(e == nil, "create session")
+	s.Droids[1].Cooldowns[0] = 70
+	s.Sabotaged = true; s.SabotageTicks = 240
+	for i = 0; i < 23; i += 1 { session.Tick(s); session.NextRandom(s, 17) }
+	e = persistence.Save(path, session.Encode(s))
+	t.expect(e == nil, "save active timers and RNG")
+	payload, e = persistence.Load(path)
+	t.expect(e == nil, "read complete state")
+	resumed, e = session.Decode(payload)
+	t.expect(e == nil, "validate complete state")
+	if e != nil { ret }
+	for i = 0; i < 80; i += 1
+	{
+		session.Tick(s); session.Tick(resumed)
+		t.equal(session.NextRandom(s, 31), session.NextRandom(resumed, 31), "same random continuation")
+	}
+	t.equalStr(session.Encode(resumed), session.Encode(s), "disk resume matches uninterrupted session")
+	resumed.Paused = true
+	paused = session.Encode(resumed)
+	for i = 0; i < 10; i += 1 { session.Tick(resumed) }
+	t.equalStr(session.Encode(resumed), paused, "pause freezes all serialised timers")
+}
