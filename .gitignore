@@ -1,0 +1,15 @@
+/reference/
+/.build/
+/build/
+/dist/
+/data/original/
+/saves/
+*.app/
+*.o
+*.dylib
+*.a
+*.dSYM/
+.DS_Store
+.meh-cache/
+/captive
+/rnc-inspect
