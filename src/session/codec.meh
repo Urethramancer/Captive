@@ -41,7 +41,7 @@ fn Encode(s:State) string
 		v.Set("inventory",items); droids.Append(v)
 	}
 	o.Set("droids",droids)
-	encodeWorld(s,o); encodeCatalogue(s,o); encodeProjectiles(s,o); encodeCameras(s,o); encodeSabotage(s,o)
+	encodeWorld(s,o); encodeCatalogue(s,o); encodeProjectiles(s,o); encodeCameras(s,o); encodeSabotage(s,o); encodeCampaign(s,o)
 	ret json.Marshal(o)
 }
 
@@ -163,6 +163,7 @@ fn Decode(text:string) State,error
 	e = decodeProjectiles(s,o); if e != nil { ret nil,e }
 	e = decodeCameras(s,o); if e != nil { ret nil,e }
 	e = decodeSabotage(s,o); if e != nil { ret nil,e }
+	e = decodeCampaign(s,o); if e != nil { ret nil,e }
 	if HasProbe(s) != s.Probe or (s.Probe and !s.ProbeReleased) { ret nil,error("session save: inconsistent probe ownership") }
 	ret s,nil
 }
@@ -184,7 +185,7 @@ fn encodeWorld(s:State,o:json.JsonValue)
 	for l = s.Loot
 	{
 		v = json.NewObject(); v.Set("kind",json.NewString(l.Kind)); setNumber(v,"x",l.X); setNumber(v,"y",l.Y)
-		setNumber(v,"value",l.Value); v.Set("collected",json.NewBool(l.Collected)); items.Append(v)
+		setNumber(v,"value",l.Value); setNumber(v,"code",l.Code); v.Set("collected",json.NewBool(l.Collected)); items.Append(v)
 	}
 	o.Set("loot",items)
 }
@@ -235,6 +236,7 @@ fn decodeWorld(s:State,o:json.JsonValue) error
 		x,e = number(v.Get("x"),0,s.Width-1); if e != nil { ret e }; item.X = x
 		y,e = number(v.Get("y"),0,s.Height-1); if e != nil { ret e }; item.Y = y
 		value,e = number(v.Get("value"),0,65535); if e != nil { ret e }; item.Value = value
+		if !v.Get("code").IsNull() { code,e=number(v.Get("code"),0,255); if e!=nil { ret e }; item.Code=code }
 		collected = v.Get("collected"); if !collected.IsBool() { ret error("session save: missing loot state") }; item.Collected = collected.Bool()
 		append(s.Loot,item)
 	}

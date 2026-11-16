@@ -1,0 +1,27 @@
+@mod campaign
+@inc os
+@inc src/session
+
+// Load reads a recovered base and its registries before replacing active play.
+fn Load(path:string,index:int64) session.State,error
+{
+	directory=os.Dir(path)
+	map,e=os.Readfile(path); if e!=nil { ret nil,e }
+	s,e=session.LoadBase(map); if e!=nil { ret nil,e }
+	infoPath=os.PathJoin(directory,format("base{}-info.tsv",index))
+	if index>0 or os.Exists(infoPath)
+	{
+		info,e=os.Readfile(infoPath); if e!=nil { ret nil,e }
+		e=session.ConfigureBase(s,info); if e!=nil { ret nil,e }
+		if s.BaseNumber!=index { ret nil,error("base: metadata seed does not match destination") }
+	}
+	report,e=os.Readfile(os.PathJoin(directory,format("mapgen-seed{}.txt",index))); if e!=nil { ret nil,e }
+	e=session.Populate(s,report); if e!=nil { ret nil,e }
+	fixtures,e=os.Readfile(os.PathJoin(directory,format("base{}-fixtures.tsv",index))); if e!=nil { ret nil,e }
+	e=session.LoadFixtures(s,fixtures); if e!=nil { ret nil,e }
+	traps,e=os.Readfile(os.PathJoin(directory,format("base{}-traps.tsv",index))); if e!=nil { ret nil,e }
+	e=session.LoadTraps(s,traps); if e!=nil { ret nil,e }
+	stock,e=os.Readfile(os.PathJoin(directory,format("base{}-stock.tsv",index))); if e!=nil { ret nil,e }
+	e=session.LoadStock(s,stock); if e!=nil { ret nil,e }
+	ret s,nil
+}

@@ -25,6 +25,7 @@ fn Use(s:State,droid:int64,index:int64) string,error
 		append(s.SoundEvents,"explosion")
 		ret "Charged leader hand destroyed the item",nil
 	}
+	if item.Kind=="die" { ret format("Die rolled {}",1+NextRandom(s,6)),nil }
 	if item.Kind == "ammo" { ret "",error("ammunition: a compatible firearm is required; none are stocked in this base") }
 	if item.Kind == "battery"
 	{

@@ -1,0 +1,139 @@
+@inc test
+@inc os
+@inc json
+@inc src/session
+
+fn campaignBase(index:int64) session.State
+{
+	map,e=os.Readfile(format(".build/recovery/base{}.tsv",index)); if e!=nil { eprintln(e.str()); exit(1) }
+	s,e=session.LoadBase(map); if e!=nil { eprintln(e.str()); exit(1) }
+	info,e=os.Readfile(format(".build/recovery/base{}-info.tsv",index)); if e!=nil { eprintln(e.str()); exit(1) }
+	e=session.ConfigureBase(s,info); if e!=nil { eprintln(e.str()); exit(1) }
+	report,e=os.Readfile(format(".build/recovery/mapgen-seed{}.txt",index)); if e!=nil { eprintln(e.str()); exit(1) }
+	e=session.Populate(s,report); if e!=nil { eprintln(e.str()); exit(1) }
+	stock,e=os.Readfile(format(".build/recovery/base{}-stock.tsv",index)); if e!=nil { eprintln(e.str()); exit(1) }
+	e=session.LoadStock(s,stock); if e!=nil { eprintln(e.str()); exit(1) }
+	ret s
+}
+
+fn testSecondBaseMetadataAndVerticalLinks(t:test.Tester)
+{
+	s=campaignBase(1)
+	t.equal(s.X,12,"original second entrance x"); t.equal(s.Y,0,"original second entrance row")
+	t.equal(s.Entrance,12,"escape uses second-base entrance")
+	t.equal(len(s.Offers),198,"seed-one original stock count")
+	t.equalStr(session.ComputerPassword(0),"CHAESELUME","preserve first computer password")
+	t.equalStr(session.ComputerPassword(1),"RUPPESICBERY","recover second computer password")
+	for cell=[int64(3*64+8),int64(4*64+2)]
+	{
+		s.X=cell%64; s.Y=cell/64; target=session.LadderTarget(s,cell)
+		t.equal(target,cell+16,"ladder follows original floor offset")
+		_,e=session.Climb(s); t.expect(e==nil,"climb to second floor")
+		t.equal(session.FloorLevel(s,s.X,s.Y),2,"second-floor section")
+		_,e=session.Climb(s); t.expect(e!=nil,"held input cannot bypass movement recharge")
+		for s.MoveTimer>0 { session.Tick(s) }
+		_,e=session.Climb(s); t.expect(e==nil,"climb back")
+		t.equal(s.Y*64+s.X,cell,"ladder round trip")
+		for s.MoveTimer>0 { session.Tick(s) }
+	}
+	encoded=session.Encode(s); restored,e=session.Decode(encoded)
+	t.expect(e==nil,"second-base save decodes")
+	if e==nil { t.equalStr(session.Encode(restored),encoded,"preserve floors, switches and loot codes") }
+}
+
+fn testOriginalSwitchAndPunchDoors(t:test.Tester)
+{
+	s=campaignBase(1)
+	t.equal(s.SwitchTargets[3*64+2],5*64,"original switch-to-door link")
+	s.X=3; s.Y=3; s.Facing=3
+	_,e=session.Interact(s); t.expect(e==nil,"activate original wall panel")
+	t.equal(s.DoorOpen[5*64],-1,"remote door opens")
+	_,e=session.Interact(s); t.expect(e==nil,"toggle panel again")
+	t.equal(s.DoorOpen[5*64],0,"remote door closes")
+	s.X=9; s.Y=1; s.Facing=0
+	_,e=session.Interact(s); t.expect(e!=nil,"punch door requires hand")
+	_,e=session.Attack(s,0,0); t.expect(e==nil,"bare hand opens punch door")
+	t.expect(session.Walkable(s,9,0),"punched doorway is traversable")
+}
+
+fn testTravelCarriesPartyAndConsumesRouteProbe(t:test.Tester)
+{
+	s=campaignBase(0); next=campaignBase(1)
+	_,e=session.Travel(s,next); t.expect(e!=nil,"cannot travel before escape")
+	s.Escaped=true; s.Sabotaged=true; s.Probe=true; s.ProbeReleased=true
+	s.SabotagePhase=3; s.Credits=4321; s.Droids[0].Parts[2]=63; s.Droids[0].Skills[1]=7
+	probe=new session.Item; probe.Kind="probe"; probe.Quantity=1; probe.Condition=100
+	append(s.Droids[0].Inventory,probe); s.Droids[0].Hands[0]=0
+	before=session.Encode(s)
+	arrived,e=session.Travel(s,next); t.expect(e==nil,"escaped party follows recovered probe route")
+	if e!=nil { eprintln(e.str()); ret }
+	t.equal(arrived.BaseNumber,1,"arrive at next recovered base")
+	t.equal(arrived.Credits,4321,"carry gold")
+	t.equal(arrived.Droids[0].Parts[2],63,"carry body condition")
+	t.equal(arrived.Droids[0].Skills[1],7,"carry skills")
+	t.equal(arrived.Droids[0].Hands[0],-1,"clear consumed probe from hand")
+	t.expect(!arrived.Probe and !arrived.Escaped and !arrived.Sabotaged,"reset destination objectives")
+	t.equalStr(session.Encode(s),before,"travel preserves departure snapshot")
+	arrived.Droids[0].Parts[2]=10
+	t.equal(s.Droids[0].Parts[2],63,"party snapshots do not alias")
+	_,e=session.Decode(session.Encode(arrived)); t.expect(e==nil,"arrival is saveable")
+}
+
+fn testFirstReleaseSaveCompatibility(t:test.Tester)
+{
+	s=campaignBase(0); value,e=json.Parse(session.Encode(s)); t.expect(e==nil,"parse first-base save")
+	old=json.NewObject()
+	for pair=value.obj
+	{ if pair.key!="base" and pair.key!="entrance" and pair.key!="floorSections" and pair.key!="switchTargets" { old.Set(pair.key,pair.val) } }
+	restored,e=session.Decode(json.Marshal(old)); t.expect(e==nil,"load a save without campaign metadata")
+	if e==nil { t.equal(restored.BaseNumber,0,"old save remains first base"); t.equal(restored.Entrance,30,"old entrance remains valid") }
+}
+
+fn testSecondPasswordAndLadderFireWave(t:test.Tester)
+{
+	s=campaignBase(1); s.X=31; s.Y=4; s.Facing=3
+	_,e=session.EnterPassword(s,"CHAESELUME"); t.expect(e!=nil,"first password cannot unlock the second computer")
+	_,e=session.EnterPassword(s,"ruppesicbery"); t.expect(e==nil,"second computer accepts recovered password")
+	t.expect(s.Probe and s.ProbeReleased,"second computer releases its own probe")
+	s.X=2; s.Y=4
+	optic=new session.Item; optic.Kind="optic"; optic.Quality=1; optic.Condition=100; optic.Quantity=1; optic.Enabled=true
+	append(s.Droids[0].Inventory,optic)
+	t.equalStr(session.Navigation(s),"Root Finder: Up","root finder preserves vertical directions")
+	s.Sabotaged=true; s.SabotagePhase=2; s.SabotageCounter=1; s.SabotageClock=5; s.FireFront=4*64+2
+	session.Tick(s)
+	t.equal(s.FireFront,4*64+18,"blast follows the original upward root across floors")
+	t.equal(s.Fire[4*64+18],1,"blast ignites the upper landing")
+	_,e=session.Decode(session.Encode(s)); t.expect(e==nil,"cross-floor blast remains saveable")
+}
+
+fn testBrainsReleasesSecondPasswordClipboard(t:test.Tester)
+{
+	s=campaignBase(1); s.X=31; s.Y=3; s.Facing=2; s.Enemies[0].Health[0]=1
+	_,e=session.Attack(s,0,0); t.expect(e==nil,"defeat second-base Brains")
+	s.X=31; s.Y=4
+	_,e=session.Collect(s); t.expect(e==nil,"collect Brains password clipboard")
+	found=false
+	for item=s.Droids[0].Inventory { if item.Kind=="password-clue" and item.Charge==1 { found=true } }
+	t.expect(found,"clipboard identifies the correct computer seed")
+}
+
+fn testSecondBaseBladePurchaseAndSkill(t:test.Tester)
+{
+	s=campaignBase(1); s.X=36; s.Y=14; s.Facing=1; s.Credits=500
+	row:int64=-1
+	for index=0; index<len(s.Offers); index+=1
+	{ offer=s.Offers[index]; if offer.Code==33 and offer.Quality==1 { row=index; break } }
+	t.expect(row>=0,"second-base catalogue contains the recovered war-blade")
+	if row<0 { ret }
+	_,e=session.Buy(s,0,row); t.expect(e==nil,"purchase an implemented blade")
+	t.equal(s.Credits,301,"charge the recovered 199 gold price")
+	e=session.Equip(s,0,0,0); t.expect(e==nil,"equip purchased blade")
+	s.X=36; s.Y=13
+	_,e=session.Attack(s,0,0); t.expect(e!=nil,"blade checks its own skill requirement")
+	enemy=new session.Enemy; enemy.Kind="TrakBall"; enemy.X=37; enemy.Y=13
+	enemy.Health=[int64(1)]; enemy.Armour=[int64(0)]; enemy.Skill=[int64(0)]
+	s.Enemies=[enemy]; s.Droids[0].Skills[1]=3
+	_,e=session.Attack(s,0,0); t.expect(e==nil,"blade resolves a melee attack")
+	t.equal(s.Droids[0].Skills[1],4,"blade combat advances blade skill")
+	t.equal(s.Droids[0].Skills[0],0,"blade kill preserves brawling skill")
+}

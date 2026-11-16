@@ -1,9 +1,9 @@
 # Captive
 
-Internal macOS reconstruction of Captive's first base, written in Meh with fresh
+Internal macOS reconstruction of Captive's first two bases, written in Meh with fresh
 AppKit/CoreGraphics and AVAudioEngine bridges. Targets macOS 15 or newer on the
-current Mac architecture. It uses the recovered seed-0000 base rather than a
-newly designed level. Licence undecided; this is not a public release.
+current Mac architecture. It uses the recovered seed-0000 and seed-0001 bases.
+Licence undecided; this is not a public release.
 
 Original installation files belong under `reference/Captive/`. They are read-only
 inputs and are excluded from Git. All extracted original data and build output
@@ -51,8 +51,8 @@ base and checks disk continuation during combat:
 
 ```sh
 mehc build base-playthrough.meh -o .build/base-playthrough -F
-.build/base-playthrough
-.build/Captive.app/Contents/MacOS/captive --replay .build/base-playthrough.tsv \
+.build/base-playthrough --campaign
+.build/Captive.app/Contents/MacOS/captive --replay .build/campaign-playthrough.tsv \
   --saves /tmp/captive-replay
 ```
 
@@ -73,6 +73,19 @@ The party starts as Rook, Bishop, Knight and Pawn without startup dialogs.
 Double-click a droid's name to edit it inline; Enter saves, Escape cancels and
 Command-A selects all. Names use 1–19 letters or digits. Computer passwords
 also use an inline field. Simulation and audio pause while typing.
+
+After escaping the first base, use the Swan's **Travel to Base 2** action (or
+Enter). The probe reveals the route and is consumed; your party, formation,
+condition, skills, equipment and credits carry over. Travel creates a fresh
+base-entry checkpoint. This is a direct Swan transfer; free Holamap flight and
+planetary surface exploration remain future work.
+
+The second base has two floors. Stand on a ladder and press Space to climb.
+Punch the appropriate doors with a hand and operate wall panels to toggle
+their linked doors. Brains drops the second computer's password clipboard.
+The original second-base catalogue includes blade weapons; armour upgrades
+and other unsupported equipment remain unavailable. Existing first-base saves
+continue to load.
 
 Runtime artwork is 1024×1024 with sprite transparency preserved. The first base
 uses cream entry panels, dark reactor metal and green service hatches across

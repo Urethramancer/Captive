@@ -20,9 +20,17 @@ fn advanceSabotage(s:State)
 	}
 	if s.FireFront < 0 or s.FireFront >= s.Width*s.Height
 	{ s.SabotagePhase = 3; s.SabotageTicks = 0; ret }
-	direction = (s.Details[s.FireFront]>>8)&3
+	direction = (s.Details[s.FireFront]>>8)&7
 	dx:[]int64 = [0,-1,0,1]; dy:[]int64 = [-1,0,1,0]
-	x = s.FireFront%s.Width+dx[direction]; y = s.FireFront/s.Width+dy[direction]
+	x=s.FireFront%s.Width; y=s.FireFront/s.Width
+	if direction<4 { x+=dx[direction]; y+=dy[direction] }
+	else
+	{
+		step:int64=1; if direction==5 { step=-1 }
+		target=FloorDestination(s,s.FireFront,step)
+		if target<0 { s.SabotagePhase=3; s.SabotageTicks=0; ret }
+		x=target%s.Width; y=target/s.Width
+	}
 	if x < 0 or x >= s.Width or y < 0 or y >= s.Height or s.FireSteps >= s.Width*s.Height
 	{ s.SabotagePhase = 3; s.SabotageTicks = 0; ret }
 	s.FireFront = y*s.Width+x; s.FireSteps += 1; igniteCross(s,s.FireFront)
@@ -46,7 +54,7 @@ fn igniteCross(s:State,at:int64)
 fn shutdownBase(s:State)
 {
 	for at = 0; at < len(s.Objects); at += 1
-	{ if (s.Objects[at]&127) == 0x15 and ((s.Objects[at]>>8)&7) == 0 { s.DoorOpen[at] = -1 } }
+	{ if (s.Objects[at]&127)==0x0c or ((s.Objects[at]&127) == 0x15 and ((s.Objects[at]>>8)&7) == 0) { s.DoorOpen[at] = -1 } }
 }
 
 // Blinded is corrected by the purchased Visor, rather than a free rendering aid.

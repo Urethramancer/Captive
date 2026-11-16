@@ -1,0 +1,105 @@
+@mod session
+@inc strings
+
+// ConfigureBase applies the original generator's entrance and floor metadata.
+fn ConfigureBase(s:State,text:string) error
+{
+	lines=strings.SplitLines(strings.Trim(text))
+	if len(lines)!=2 or lines[0]!="seed\tstartX\tstartY\tfacing\tfloors" { ret error("base: invalid metadata header") }
+	fields=strings.Split(lines[1],"\t"); if len(fields)!=5 { ret error("base: invalid metadata row") }
+	seed,e=parseCell(fields[0],10,65535); if e!=nil { ret e }
+	x,e=parseCell(fields[1],10,s.Width-1); if e!=nil { ret e }
+	y,e=parseCell(fields[2],10,s.Height-1); if e!=nil { ret e }
+	facing,e=parseCell(fields[3],10,3); if e!=nil { ret e }
+	entry=x; expectedY:int64=0; if seed==0 { expectedY=1 }
+	if y!=expectedY or !Walkable(s,x,y) or s.Entrance!=entry { ret error("base: metadata entrance disagrees with map") }
+	sections=strings.Split(fields[4],","); if len(sections)!=16 { ret error("base: expected sixteen floor sections") }
+	floors=new([]int64)
+	for field=sections { level,e=parseCell(field,10,6); if e!=nil { ret e }; if level<1 { ret error("base: invalid floor level") }; append(floors,level) }
+	s.BaseNumber=seed; s.Rng=seed; s.X=x; s.Y=y; s.Facing=facing; s.Entrance=entry; s.FloorSections=floors
+	s.Visited=new([]int64); for tile=s.Tiles { append(s.Visited,0) }; s.Visited[y*s.Width+x]=1
+	ret nil
+}
+
+// FloorLevel reads the recovered section table; it grants no navigation aid.
+fn FloorLevel(s:State,x:int64,y:int64) int64
+{
+	section=(y/8)*4+x/16
+	if section<0 or section>=len(s.FloorSections) { ret 1 }
+	ret s.FloorSections[section]
+}
+
+// LadderTarget resolves a ladder between the aligned original floor sections.
+fn LadderTarget(s:State,cell:int64) int64
+{
+	if cell<0 or cell>=len(s.Objects) { ret -1 }
+	object=s.Objects[cell]&127
+	if object!=4 and object!=5 { ret -1 }
+	direction:int64=1; if object==5 { direction=-1 }
+	destination=FloorDestination(s,cell,direction); if destination<0 { ret -1 }
+	expected:int64=5; if object==5 { expected=4 }
+	if (s.Objects[destination]&127)!=expected { ret -1 }
+	ret destination
+}
+
+fn FloorDestination(s:State,cell:int64,direction:int64) int64
+{
+	if cell<0 or cell>=len(s.Objects) or (direction!=1 and direction!=-1) { ret -1 }
+	x=cell%s.Width; y=cell/s.Width; level=FloorLevel(s,x,y)
+	target=level+direction
+	from:int64=-1; to:int64=-1
+	for section=0; section<16; section+=1
+	{
+		if s.FloorSections[section]==level and from<0 { from=section }
+		if s.FloorSections[section]==target and to<0 { to=section }
+	}
+	if from<0 or to<0 { ret -1 }
+	tx=x+(to%4-from%4)*16; ty=y+(to/4-from/4)*8
+	if tx<0 or ty<0 or tx>=s.Width or ty>=s.Height { ret -1 }
+	ret ty*s.Width+tx
+}
+
+// Climb changes floors only from a matching pair of original ladder cells.
+fn Climb(s:State) string,error
+{
+	if !canAct(s) or s.CameraIndex>=0 { ret "",error("ladder: party unavailable") }
+	if s.MoveTimer>0 { ret "",error("ladder: movement recharging") }
+	destination=LadderTarget(s,s.Y*s.Width+s.X)
+	if destination<0 { ret "",error("ladder: stand on a ladder to climb") }
+	if EnemyAt(s,destination%s.Width,destination/s.Width)>=0 { ret "",error("ladder: landing is occupied") }
+	s.X=destination%s.Width; s.Y=destination/s.Width; s.Visited[destination]=1; s.MoveTimer=movementDelay(s)
+	append(s.SoundEvents,"move")
+	ret format("Climbed to floor {}",FloorLevel(s,s.X,s.Y)),nil
+}
+
+// ComputerPassword reproduces the original four-syllable, 16-bit generator.
+fn ComputerPassword(seed:int64) string
+{
+	first:[]string=["VI","RUP","YUL","SCO","PHY","RAT","QUE","CHA","SY","POC","E","EX","DE","LAP","EL","MID"]
+	second:[]string=["SO","SI","LE","NE","SIC","THA","ENE","INS","OO","ES","GIN","CEP","LTE","PE","DER","S"]
+	third:[]string=["SY","POC","E","EX","DE","LAP","EL","MID","SO","SI","LE","NE","SIC","THA","ENE","INS"]
+	last:[]string=["DON","S","ING","ST","Y","ED","BERY","SY","LUME","TON","FAR","HAM","KAL","APE","BEE","INK"]
+	n=(seed*2)&65535; for step=0; step<3; step+=1 { n=(n*1509+41)&65535 }
+	ret first[n&15]+second[(n>>4)&15]+third[(n>>8)&15]+last[(n>>12)&15]
+}
+
+// Travel installs a fresh recovered base and carries an independent party copy.
+// The recovered probe is used for the route; old world objects stay behind.
+fn Travel(previous:State,next:State) State,error
+{
+	if !previous.Escaped or !previous.Sabotaged or !previous.Probe or !HasProbe(previous) { ret nil,error("travel: escape with the probe first") }
+	if next==nil or next.BaseNumber!=previous.BaseNumber+1 or next.Ticks!=0 or next.Sabotaged or next.Escaped { ret nil,error("travel: invalid destination") }
+	party,e=Decode(Encode(previous)); if e!=nil { ret nil,e }
+	destination,e=Decode(Encode(next)); if e!=nil { ret nil,e }
+	destination.Droids=party.Droids; destination.Formation=party.Formation; destination.Leader=party.Leader; destination.Credits=party.Credits
+	destination.Ticks=party.Ticks; destination.EnergySteps=party.EnergySteps
+	for d=destination.Droids
+	{
+		for index=0; index<len(d.Inventory); index+=1
+		{
+			if d.Inventory[index].Kind=="probe" and d.Inventory[index].Quantity>0
+			{ item=d.Inventory[index]; item.Quantity=1; d.Inventory[index]=item; consumeItem(d,index) }
+		}
+	}
+	ret destination,nil
+}

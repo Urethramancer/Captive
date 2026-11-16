@@ -23,6 +23,8 @@ fn dropGold(s:State,e:Enemy)
 	loot = new Loot; loot.Kind = "gold"; loot.X = e.X; loot.Y = e.Y
 	loot.Value = len(e.Health)*10+NextRandom(s,100)
 	append(s.Loot,loot)
+	if e.Kind=="Brains" and s.BaseNumber>0
+	{ clue=new Loot; clue.Kind="password-clue"; clue.Code=102; clue.Value=s.BaseNumber; clue.X=e.X; clue.Y=e.Y; append(s.Loot,clue) }
 }
 
 fn damageGroup(s:State,e:Enemy,damage:int64,owner:int64)

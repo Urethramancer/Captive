@@ -110,7 +110,13 @@ func export(segment, input, output, fixtures, traps, shops string, info ...strin
 			return fmt.Errorf("memory is truncated before the map seed")
 		}
 		metadata.WriteString("seed\tstartX\tstartY\tfacing\tfloors\n")
-		fmt.Fprintf(&metadata, "%d\t%d\t%d\t2\t", word(0x4468), x, y)
+		// DS:1412 is the starting floor, not a row coordinate. Ordinary bases
+		// start on row zero; the first-base airlock is the explicit exception.
+		startY := 0
+		if word(0x4468) == 0 {
+			startY = 1
+		}
+		fmt.Fprintf(&metadata, "%d\t%d\t%d\t2\t", word(0x4468), x, startY)
 		for i, level := range memory[base+0x13f0 : base+0x1400] {
 			if level < 1 || level > 6 {
 				return fmt.Errorf("invalid floor section %d", i)
@@ -154,7 +160,7 @@ func export(segment, input, output, fixtures, traps, shops string, info ...strin
 			return err
 		}
 	}
-	fmt.Printf("Exported 64×32 cells; start (%d,%d).\n", x, y)
+	fmt.Printf("Exported 64×32 cells; entrance column %d, starting floor %d.\n", x, y)
 	return nil
 }
 

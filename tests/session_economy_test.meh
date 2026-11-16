@@ -7,7 +7,7 @@ fn shopParty() session.State
 	s,e = session.New(3,3,[1,1,1,1,1,1,1,1,1],1,1,23)
 	if e != nil { eprintln(e.str()); exit(1) }
 	s.Objects[1] = 0x12
-	returnText = "shop\tx\ty\titem\tkind\tcategory\tquality\tprice\titemData\tflags\tname\n1\t1\t0\t31\tweapon\t0\t0\t49\t10\t21\tKNUCKLE-DUSTER\n1\t1\t0\t26\tbattery\t-1\t0\t5099\t23\t1\tBATTERY\n1\t1\t0\t33\tweapon\t1\t0\t1200\t10\t21\tLATER SWORD\n"
+	returnText = "shop\tx\ty\titem\tkind\tcategory\tquality\tprice\titemData\tflags\tname\n1\t1\t0\t31\tweapon\t0\t0\t49\t10\t21\tKNUCKLE-DUSTER\n1\t1\t0\t26\tbattery\t-1\t0\t5099\t23\t1\tBATTERY\n1\t1\t0\t35\tweapon\t2\t0\t1200\t10\t21\tLATER FIREARM\n"
 	e = session.LoadStock(s,returnText)
 	if e != nil { eprintln(e.str()); exit(1) }
 	ret s

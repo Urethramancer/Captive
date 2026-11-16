@@ -5,6 +5,7 @@
 @inc src/session
 @inc src/persistence
 @inc src/presentation
+@inc src/campaign
 
 fn validName(name:string) bool
 {
@@ -18,11 +19,24 @@ class Application
 	State:session.State
 	View:presentation.View
 	SaveDirectory:string
+	BaseDirectory:string
 	Sounds:[]int64
 	ReplaySnapshot:string
 	ReplayLoads:int64
 	ResetClock:bool
 	EditorWasPaused:bool
+	fn Travel() error
+	{
+		if self.State.BaseNumber!=0 { ret error("The second base completes the current campaign milestone.") }
+		if !self.State.Escaped { ret error("Escape with the probe before returning to the Swan.") }
+		next,e=campaign.Load(os.PathJoin(self.BaseDirectory,"base1.tsv"),1); if e!=nil { ret error("Cannot load the second base: "+e.str()) }
+		arrived,e=session.Travel(self.State,next); if e!=nil { ret e }
+		e=persistence.Save(os.PathJoin(self.SaveDirectory,"base-entry.captive"),session.Encode(arrived)); if e!=nil { ret e }
+		self.State=arrived; self.View.Inventory=-1; self.View.Page=0; self.View.StockPage=0; self.View.SelectedItem=-1
+		self.View.Window.AudioClear(); self.View.Window.AudioPause(false); self.ResetClock=true
+		self.View.Message="Base 2 reached. Turn left into the entry passage; Space climbs ladders."
+		ret nil
+	}
 	fn BeginEdit(kind:string, droid:int64)
 	{
 		text=""; if kind=="name" { text=self.State.Droids[droid].Name }
@@ -62,6 +76,7 @@ class Application
 		if len(fields)!=4 { ret error("replay: expected four fields") }
 		a=atoi(fields[1]); b=atoi(fields[2]); ticks=atoi(fields[3]); kind=fields[0]
 		if ticks<0 or ticks>36000 { ret error("replay: tick count outside bounds") }
+		if kind=="travel" { ret self.Travel() }
 		if kind=="save"
 		{
 			self.ReplaySnapshot=session.Encode(self.State)
@@ -113,6 +128,7 @@ class Application
 	}
 	fn Action(action:string)
 	{
+		if action=="travel" { e=self.Travel(); if e!=nil { self.View.Message=e.str(); eprintln(e.str()) }; ret }
 		if strings.HasPrefix(action,"rename:") { self.BeginEdit("name",atoi(action[7:])); ret }
 		if action=="save" { self.Save("manual.captive"); ret }
 		if action=="load" { self.Load("manual.captive"); ret }
@@ -141,9 +157,10 @@ class Application
 				item=d.Inventory[held]
 				if item.Kind=="clue"
 				{ if item.Charge==2 { self.View.Message="RATT: CHAESELUME" } else { self.View.Message=format("Clipboard message {}",item.Charge) }; ret }
+				if item.Kind=="password-clue" { self.View.Message="COMPUTER: "+session.ComputerPassword(item.Charge); ret }
 				if item.Kind=="probe" { self.View.Message="Planet probe secured. Sabotage the generators and escape."; ret }
 				if item.Kind=="explosives" { kind="interact" }
-				if item.Kind=="battery" or item.Kind=="device" or item.Kind=="optic" or item.Kind=="camera" or item.Kind=="ball" or item.Kind=="mine" or item.Kind=="ammo" { kind="use"; b=held }
+				if item.Kind=="battery" or item.Kind=="device" or item.Kind=="optic" or item.Kind=="camera" or item.Kind=="ball" or item.Kind=="mine" or item.Kind=="ammo" or item.Kind=="die" { kind="use"; b=held }
 			}
 			front=session.FrontCell(self.State)
 			if front>=0 and self.State.FixtureTypes[front]==0
@@ -156,6 +173,7 @@ class Application
 	}
 	fn Key(code:int64)
 	{
+		if self.State.Escaped and (code==host.KeySpace or code==host.KeyEnter) { self.Action("travel"); ret }
 		if code==host.KeyEscape { self.Action("pause"); ret }
 		if code==host.KeyF5 { self.Save("quick.captive"); ret }
 		if code==host.KeyF9 { self.Load("quick.captive"); ret }
@@ -200,23 +218,13 @@ fn run() error
 		else if argv[i]=="--replay" and i+1<len(argv) { i+=1; replayPath=argv[i] }
 		else { ret error("usage: captive [--smoke] [--seconds N] [--base FILE] [--assets DIR] [--saves DIR]") }
 	}
-	baseText,e=os.Readfile(basePath); if e != nil { ret e }
-	state,e=session.LoadBase(baseText); if e != nil { ret e }
-	reportPath=os.PathJoin(os.Dir(basePath),"mapgen-seed0.txt")
-	report,e=os.Readfile(reportPath); if e != nil { ret e }
-	e=session.Populate(state,report); if e != nil { ret e }
-	fixtures,e=os.Readfile(os.PathJoin(os.Dir(basePath),"base0-fixtures.tsv")); if e != nil { ret e }
-	e=session.LoadFixtures(state,fixtures); if e != nil { ret e }
-	traps,e=os.Readfile(os.PathJoin(os.Dir(basePath),"base0-traps.tsv")); if e != nil { ret e }
-	e=session.LoadTraps(state,traps); if e != nil { ret e }
-	stock,e=os.Readfile(os.PathJoin(os.Dir(basePath),"base0-stock.tsv")); if e!=nil { ret e }
-	e=session.LoadStock(state,stock); if e!=nil { ret e }
-	window=new host.Window("Captive — First Base")
+	state,e=campaign.Load(basePath,0); if e!=nil { ret e }
+	window=new host.Window("Captive — Droid Link")
 	if !window.Valid() { ret error("Cannot open macOS presentation") }
 	defer window.Close()
 	names:[]string=["Rook","Bishop","Knight","Pawn"]
 	e=session.InitialiseParty(state,names); if e != nil { ret e }
-	app=new Application; app.State=state; app.View=new presentation.View(window); app.SaveDirectory=savePath
+	app=new Application; app.State=state; app.View=new presentation.View(window); app.SaveDirectory=savePath; app.BaseDirectory=os.Dir(basePath)
 	// Original art is local inspection data, never a tracked game asset.
 	app.View.OriginalWall=window.LoadImage(os.PathJoin(assetPath,"original-wall.png"))
 	app.View.OriginalDoor=window.LoadImage(os.PathJoin(assetPath,"original-door.png"))
@@ -244,13 +252,14 @@ fn run() error
 		if !os.Isdir(savePath) { e=os.Mkdirall(savePath,0o700); if e != nil { ret e } }
 		app.Save("base-entry.captive")
 	}
-	replay=new([]string); replayAt:int64=1
+	replay=new([]string); replayAt:int64=1; expectedBase:int64=0
 	if replayPath!=""
 	{
 		text,e=os.Readfile(replayPath); if e!=nil { ret e }
 		if len(text)>4194304 { ret error("replay: transcript too large") }
 		replay=strings.SplitLines(strings.Trim(text))
 		if len(replay)<2 or len(replay)>100000 or replay[0]!="kind\ta\tb\tticks" { ret error("replay: invalid transcript") }
+		for line=replay { if strings.HasPrefix(line,"travel\t") { expectedBase+=1 } }
 	}
 	start=nano(); previous=start; accumulator:int64=0; capturedZones:int64=0
 	for window.Pump()
@@ -284,12 +293,16 @@ fn run() error
 		if replayPath!=""
 		{
 			zone=app.State.Y/8; if zone>2 { zone=2 }
-			if (capturedZones&(int64(1)<<zone))==0
-			{ if !window.Capture(os.PathJoin(savePath,format("replay-zone-{}.png",zone))) { ret error(window.Error()) }; capturedZones|=int64(1)<<zone }
+			captureBit=app.State.BaseNumber*3+zone
+			if (capturedZones&(int64(1)<<captureBit))==0
+			{
+				name=format("replay-zone-{}.png",zone); if app.State.BaseNumber>0 { name=format("replay-base-{}-zone-{}.png",app.State.BaseNumber+1,zone) }
+				if !window.Capture(os.PathJoin(savePath,name)) { ret error(window.Error()) }; capturedZones|=int64(1)<<captureBit
+			}
 			if strings.HasPrefix(replay[replayAt-1],"save\t") { if !window.Capture(os.PathJoin(savePath,"replay-midway.png")) { ret error(window.Error()) } }
 			if replayAt==len(replay)
 			{
-				if !app.State.Escaped or !app.State.Probe or !app.State.Sabotaged or app.ReplayLoads==0 { ret error("replay did not complete the base and resume a saved session") }
+				if !app.State.Escaped or !app.State.Probe or !app.State.Sabotaged or app.ReplayLoads==0 or app.State.BaseNumber!=expectedBase { ret error("replay did not complete the requested bases and resume a saved session") }
 				if !window.Capture(os.PathJoin(savePath,"replay-final.png")) { ret error(window.Error()) }
 				println("Packaged replay completed: probe recovered, generators sabotaged, escaped after save/load.")
 				ret nil

@@ -37,7 +37,7 @@ fn advanceWorld(s:State)
 		if (x != s.X or y != s.Y) and Walkable(s,x,y) and EnemyAt(s,x,y) < 0
 		{
 			for loot = s.Loot
-			{ if loot.Kind == "clue" and loot.Value == 2 and loot.X == e.X and loot.Y == e.Y { loot.X = x; loot.Y = y } }
+			{ if ((loot.Kind == "clue" and loot.Value == 2) or loot.Kind=="password-clue") and loot.X == e.X and loot.Y == e.Y { loot.X = x; loot.Y = y } }
 			e.X = x; e.Y = y; DetonateMine(s,y*s.Width+x)
 		}
 	}

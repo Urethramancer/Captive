@@ -17,7 +17,7 @@ For the observed process, CS was `2394` and DS was `275b`. These are relocation-
 | `1428` | 2,048 little-endian terrain/generation words |
 | `2438` | 2,048 little-endian object/feature words |
 | `3448` | 2,048 little-endian root-path/detail words |
-| `1410`, `1412` | Starting x and y, respectively |
+| `1410`, `1412` | Entrance column and starting floor level, respectively |
 | `4992` | Generated display text, 32 rows of a row label, 64 encoded glyphs and newline |
 
 All offsets above are hexadecimal. Index each cell as `y * 64 + x`; east increases x and south increases y. `.build/recovery/base0.tsv` records all three raw words for every coordinate. Do not interpret the terrain words as general floor-type identifiers: positive values are digger sequence numbers; negative values also encode occupied/special locations.
@@ -52,13 +52,19 @@ The [starting-game guide](https://captive.atari.org/Main/StartGame/StartGame.php
 ## Second-base export
 
 The original DOS MapGen was run again for mission 1, level 1 (seed 0001),
-with complete map, encounter, object and switch reports. Its map starts at
-(12,1), with the entrance at (12,0). The section levels at DS:`13f0` are
+with complete map, encounter, object and switch reports. Its entrance is
+at (12,0). The section levels at DS:`13f0` are
 `1,2,2,2,6,2,2,6,6,6,6,6,6,6,6,6`; level six denotes unused sections here.
 The floor offset tables at DS:`1400` and `1408` give a 16-cell horizontal
 offset between the two occupied floors. The paired ladder coordinates are
 (8,3)/(24,3) and (2,4)/(18,4). There are four switch-to-door records, six
 shops and nine generators. All output remains ignored local inspection data.
+
+DS:`1412` is the starting **floor level**, not the row coordinate. Unlike the
+special first-base airlock, the general starting position is on row zero:
+the second base therefore starts at (12,0), facing south. The cell (12,1)
+is a wall. This is independently corroborated by the
+[starting-position investigation](https://captive.atari.org/Technical/MapGen/PlayerStart.php).
 
 The second map TSV SHA-256 is
 `fa567ba232b043bced17826b74f0c29dab6f7a62baa0f6b27ccdf0de9796bfc6`;
@@ -67,6 +73,17 @@ the complete text report SHA-256 is
 `mapgen-export -info FILE` preserves the seed, entrance and section levels.
 `main-export -seed 1` applies the recovered availability and quality rules,
 including the seed-dependent price increment, to produce 198 offers.
+
+The four door-toggle links come directly from the text report. Ladder travel
+uses the recovered section offsets. The destructive fire wave also follows
+vertical root values 4 and 5, rather than masking them into compass directions.
+The original password routine at `102d6` doubles the base seed before its
+three 16-bit `n = n*1509+41` steps. The four syllable tables produce
+`CHAESELUME` for seed zero and `RUPPESICBERY` for seed one (computer index zero).
+Blade damage, skill thresholds, punch-door strength and static-fire pacing
+remain remaster tuning; these values have not been verified against an Amiga
+playthrough. Travel currently implements a direct Swan transfer and consumes
+the route probe, without simulating the Holamap or planetary surface.
 
 ## Remaining gameplay verification
 

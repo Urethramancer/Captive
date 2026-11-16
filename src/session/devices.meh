@@ -33,8 +33,9 @@ fn Navigation(s:State) string
 {
 	if HasEquipment(s,"optic",1)
 	{
-		root = (s.Details[s.Y*s.Width+s.X]>>8)&3
-		directions:[]string = ["North","West","South","East"]
+		root = (s.Details[s.Y*s.Width+s.X]>>8)&7
+		directions:[]string = ["North","West","South","East","Up","Down"]
+		if root>=len(directions) { ret "Root Finder: signal unavailable" }
 		ret format("Root Finder: {}",directions[root])
 	}
 	if HasEquipment(s,"optic",4)

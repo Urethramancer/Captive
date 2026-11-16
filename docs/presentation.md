@@ -29,6 +29,15 @@ The default party starts without prompts. Names and computer passwords are
 edited in the game view, with Enter to confirm, Escape to cancel and Command-A
 to select all. Simulation and audio pause during editing.
 
+After the first escape, the Swan route panel transfers the surviving party to
+the recovered seed-0001 base. Its two floors use different material sets and
+floor/ceiling colours; projected ladder rungs mark the original vertical links.
+Space climbs from a ladder cell. The existing hand controls punch doors, and
+amber wall panels operate their recovered remote doors. Blade skill is shown
+beside brawling skill when inspecting a droid in the second base.
+The second escape completes this two-base milestone. No new release tag is
+created automatically.
+
 Right-click another droid's name to transfer the selected inventory item.
 Right-click held equipment facing a shop to repair it. Stock shows each actual
 shop's catalogue and prices; disabled offers cannot charge gold. Ammunition

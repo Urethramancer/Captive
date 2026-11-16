@@ -31,6 +31,10 @@ class Droid
 
 class State
 {
+	BaseNumber:int64
+	Entrance:int64
+	FloorSections:[]int64
+	SwitchTargets:[]int64
 	X:int64
 	Y:int64
 	Facing:int64
@@ -97,6 +101,9 @@ fn New(width:int64, height:int64, tiles:[]int64, x:int64, y:int64, seed:int64) S
 	{ if tile < 0 or tile > 255 { ret nil, error("session: invalid map tile") } }
 	s = new State
 	s.Width = width; s.Height = height; s.X = x; s.Y = y; s.Rng = seed
+	s.Entrance=-1; if width==64 { s.Entrance=30 }
+	s.FloorSections=new([]int64); for i=0; i<16; i+=1 { append(s.FloorSections,1) }
+	s.SwitchTargets=new([]int64); for tile=tiles { append(s.SwitchTargets,-1) }
 	s.Terrain = new([]int64); s.Objects = new([]int64); s.Details = new([]int64)
 	s.Tiles = new([]int64)
 	for tile = tiles { append(s.Tiles, tile); append(s.Terrain,tile); append(s.Objects,0); append(s.Details,0) }
@@ -177,6 +184,7 @@ fn Move(s:State, relative:int64) error
 	if !Walkable(s,x,y) or EnemyAt(s,x,y) >= 0
 	{ ret error("session: passage blocked") }
 	s.X = x; s.Y = y; s.Visited[y*s.Width+x] = 1; s.MoveTimer = movementDelay(s)
+	if (s.Objects[y*s.Width+x]&127)==0x1e { s.BlindTicks=90 }
 	if !Ceiling(s) { DetonateMine(s,y*s.Width+x) }
 	s.EnergySteps = (s.EnergySteps+1)%10
 	if s.EnergySteps == 0 { for d = s.Droids { if Alive(d) { d.Energy -= 1 } } }

@@ -9,7 +9,8 @@
 
 ## Deferred campaign
 
-- Campaign generation beyond the first base.
-- Space travel and later equipment.
+- Campaign generation beyond the second base.
+- Full Holamap flight, planetary surface travel and remaining equipment,
+  including armour upgrades and firearms.
 - Give later bases distinct architectural kits, floor and ceiling treatments,
   lighting and machinery silhouettes, extending the selectable material sets.

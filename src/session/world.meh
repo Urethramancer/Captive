@@ -14,6 +14,7 @@ class Enemy
 }
 class Loot
 {
+	Code:int64
 	X:int64
 	Y:int64
 	Kind:string
@@ -28,6 +29,15 @@ fn reportNumber(line:string, marker:string, digits:int64) int64,error
 	ret parseCell(line[at+len(marker):at+len(marker)+digits],16,65535)
 }
 
+fn reportPoint(line:string,marker:string) int64,int64,error
+{
+	at=strings.IndexOf(line,marker)+len(marker)
+	if at<len(marker) or at+5>len(line) { ret 0,0,error("base report: missing coordinate") }
+	x,e=parseCell(line[at:at+2],16,63); if e!=nil { ret 0,0,e }
+	y,e=parseCell(line[at+3:at+5],16,31); if e!=nil { ret 0,0,e }
+	ret x,y,nil
+}
+
 // Populate reads generated enemy individuals and actual item placements from the
 // original MapGen textual export. No encounters or loot are invented.
 fn Populate(s:State, text:string) error
@@ -38,6 +48,15 @@ fn Populate(s:State, text:string) error
 	for raw = strings.SplitLines(text)
 	{
 		line = strings.Trim(raw)
+		if strings.HasPrefix(line,"Switch(")
+		{
+			x,y,e=reportPoint(line,"Switch(."); if e!=nil { ret e }
+			tx,ty,e=reportPoint(line,"Affect(."); if e!=nil { ret e }
+			if x>=s.Width or y>=s.Height or tx>=s.Width or ty>=s.Height or !strings.Contains(line,"Type Door Tog") { ret error("base report: unsupported switch record") }
+			target=ty*s.Width+tx; if (s.Objects[target]&127)!=0x15 { ret error("base report: switch target is not a door") }
+			s.SwitchTargets[y*s.Width+x]=target
+			continue
+		}
 		if strings.Contains(line,"Str(.")
 		{
 			if strings.Contains(line,"(.") and !strings.Contains(line[0:1],".")
@@ -73,7 +92,11 @@ fn Populate(s:State, text:string) error
 			else if strings.Contains(line,"ZlotWep") { item.Kind = "zlot" }
 			else if strings.Contains(line,"Explosi") { item.Kind = "explosives" }
 			else if strings.Contains(line,"clue") { item.Kind = "clue" }
+			else if strings.Contains(line,"SupBall") { item.Kind = "ball" }
+			else if strings.Contains(line,"Die") { item.Kind = "die" }
 			else { ret error("base report: unsupported original item") }
+			start=strings.IndexOf(line,")")+1; descriptor=strings.Trim(line[start:])
+			code,e=parseCell(descriptor[:2],16,255); if e!=nil { ret e }; item.Code=code
 			last = strings.Trim(line[len(line)-5:])
 			v,e = parseCell(last[:4],16,65535); if e != nil { ret e }
 			item.Value = v

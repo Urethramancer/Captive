@@ -49,7 +49,7 @@ fn LoadStock(s:State,text:string) error
 // SupportedOffer prevents selling any item whose behaviour is not implemented.
 fn SupportedOffer(o:Offer) bool
 {
-	ret o.Kind == "battery" or o.Kind == "explosives" or o.Kind == "ammo" or o.Kind == "ball" or o.Kind == "mine" or o.Kind == "camera" or (o.Kind == "optic") or (o.Kind == "device") or (o.Kind == "weapon" and (o.Code == 31 or o.Code == 32))
+	ret o.Kind == "battery" or o.Kind == "explosives" or o.Kind == "ammo" or o.Kind == "ball" or o.Kind == "mine" or o.Kind == "camera" or (o.Kind == "optic") or (o.Kind == "device") or (o.Kind == "weapon" and o.Code>=31 and o.Code<=34)
 }
 
 // Buy purchases a real catalogue row from the shop directly ahead.

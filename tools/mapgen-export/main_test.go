@@ -70,7 +70,7 @@ func TestExportRegistries(t *testing.T) {
 		t.Fatal(err)
 	}
 	metadata, err := os.ReadFile(info)
-	if err != nil || string(metadata) != "seed\tstartX\tstartY\tfacing\tfloors\n1\t30\t1\t2\t1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1\n" {
+	if err != nil || string(metadata) != "seed\tstartX\tstartY\tfacing\tfloors\n1\t30\t0\t2\t1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1\n" {
 		t.Fatalf("incorrect map metadata: %q, %v", metadata, err)
 	}
 	for i, want := range []string{"x\ty\ttype\textra\n29\t1\t0\t0\n", "cupboardX\tcupboardY\twallX\twallY\n26\t1\t27\t0\n", "number\tx\ty\n1\t27\t17\n2\t24\t2\n"} {

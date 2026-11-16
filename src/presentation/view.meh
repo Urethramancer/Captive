@@ -54,6 +54,7 @@ class View
 	Wall:int64
 	WallSets:[]int64
 	ZoneHeight:int64
+	MaterialOffset:int64
 	Door:int64
 	Generator:int64
 	Terminal:int64
@@ -89,11 +90,11 @@ class View
 	{
 		if len(self.WallSets)==0 or self.ZoneHeight<1 { ret self.Wall }
 		zone=y/self.ZoneHeight; if zone<0 { zone=0 }; if zone>=len(self.WallSets) { zone=len(self.WallSets)-1 }
-		ret self.WallSets[zone]
+		ret self.WallSets[(zone+self.MaterialOffset)%len(self.WallSets)]
 	}
 	fn ItemName(s:session.State,item:session.Item) string
 	{
-		if item.Kind=="clue" { ret "Clipboard" }; if item.Kind=="probe" { ret "Planet Probe" }
+		if item.Kind=="clue" or item.Kind=="password-clue" { ret "Clipboard" }; if item.Kind=="probe" { ret "Planet Probe" }
 		for offer=s.Offers { if offer.Code==item.Code and offer.Quality==item.Quality and offer.Kind==item.Kind { ret stockName(offer) } }
 		ret equipmentName(item.Kind,item.Quality,item.Kind)
 	}
@@ -101,10 +102,12 @@ class View
 	{
 		w = self.Window
 		eyeX,eyeY,eyeFacing,remote=session.CameraView(s)
+		self.MaterialOffset=s.BaseNumber+session.FloorLevel(s,eyeX,eyeY)-1
 		w.Rect(24.0,78.0,928.0,500.0,uint32(0x030707ff))
 		ceiling:uint32=0x161d1bff; floor:uint32=0x30312aff
 		if eyeY>=8 and eyeY<16 { ceiling=0x101a21ff; floor=0x242c30ff }
 		if eyeY>=16 { ceiling=0x14211cff; floor=0x233126ff }
+		if s.BaseNumber==1 { ceiling=0x17241fff; floor=0x28352cff; if session.FloorLevel(s,eyeX,eyeY)==2 { ceiling=0x111b24ff; floor=0x252d36ff } }
 		w.Rect(28.0,82.0,920.0,246.0,ceiling)
 		w.Rect(28.0,328.0,920.0,246.0,floor)
 		dx:[]float64 = [0.0,1.0,0.0,-1.0]; dy:[]float64 = [-1.0,0.0,1.0,0.0]
@@ -141,7 +144,7 @@ class View
 			fraction = coordinate-float64(int64(coordinate))
 			texture=self.Material(y)
 			if self.Original and self.OriginalWall>0 { texture=self.OriginalWall }
-			if x>=0 and y>=0 and x<s.Width and y<s.Height and (s.Objects[y*s.Width+x]&127)==0x15 { texture=self.Door }
+			if x>=0 and y>=0 and x<s.Width and y<s.Height and ((s.Objects[y*s.Width+x]&127)==0x15 or (s.Objects[y*s.Width+x]&127)==0x0c) { texture=self.Door }
 			if self.Original and x>=0 and y>=0 and x<s.Width and y<s.Height and (s.Objects[y*s.Width+x]&127)==0x15 and self.OriginalDoor>0 { texture=self.OriginalDoor }
 			if texture>0
 			{
@@ -157,7 +160,7 @@ class View
 			if x>=0 and y>=0 and x<s.Width and y<s.Height
 			{
 				cell=y*s.Width+x; px=28.0+float64(column)*self.RayWidth
-				if s.FixtureTypes[cell]==0 and fraction>0.34 and fraction<0.66
+				if (s.FixtureTypes[cell]==0 or s.SwitchTargets[cell]>=0) and fraction>0.34 and fraction<0.66
 				{
 					plateTop=328.0-fullHeight*0.14; plateHeight=fullHeight*0.28
 					if plateTop<84.0 { plateTop=84.0 }; if plateTop+plateHeight>548.0 { plateHeight=548.0-plateTop }
@@ -200,7 +203,17 @@ class View
 			if visibleTop<82.0 { visibleTop=82.0 }; if top+visibleHeight>574.0 { visibleHeight=574.0-top }
 			if visibleHeight-(visibleTop-top)<=0.0 { continue }
 			visible=true
-			if image>0 { self.Window.ImageCrop(image,u,(visibleTop-top)/size,self.RayWidth/size,(visibleHeight-(visibleTop-top))/size,x,visibleTop,self.RayWidth+0.1,visibleHeight-(visibleTop-top)) }
+			if image==-1
+			{
+				if u<0.12 or u>0.88 { self.Window.Rect(x,visibleTop,self.RayWidth+0.1,visibleHeight-(visibleTop-top),uint32(0xa3afa4ff)) }
+				for rung=0; rung<7; rung+=1
+				{
+					yy=top+size*(0.08+float64(rung)*0.14); bottom=yy+size*0.035
+					if yy<visibleTop { yy=visibleTop }; if bottom>top+visibleHeight { bottom=top+visibleHeight }; hh=bottom-yy
+					if hh>0 { self.Window.Rect(x,yy,self.RayWidth+0.1,hh,uint32(0x889a90ff)) }
+				}
+			}
+			else if image>0 { self.Window.ImageCrop(image,u,(visibleTop-top)/size,self.RayWidth/size,(visibleHeight-(visibleTop-top))/size,x,visibleTop,self.RayWidth+0.1,visibleHeight-(visibleTop-top)) }
 			else { self.Window.Rect(x,visibleTop,self.RayWidth+0.1,visibleHeight-(visibleTop-top),uint32(0x9c6d43ff)) }
 		}
 		if visible and centre>70.0 and centre<900.0 and distance<4.0 and top>104.0 { self.Window.Text(label,centre-44.0,top-22.0,14.0,amber) }
@@ -226,7 +239,7 @@ class View
 			for cell=0; cell<len(s.Objects); cell+=1
 			{
 				kind=s.Objects[cell]&127
-				if kind!=9 and kind!=0x12 and kind!=0x13 { continue }
+				if kind!=9 and kind!=0x12 and kind!=0x13 and kind!=4 and kind!=5 { continue }
 				rx=float64(cell%s.Width-eyeX); ry=float64(cell/s.Width-eyeY)
 				distance=rx*forwardX+ry*forwardY
 				if int64(distance)!=pass { continue }
@@ -234,6 +247,7 @@ class View
 				image=self.Terminal; label="COMPUTER"
 				if kind==9 { image=self.Generator; label="GENERATOR"; distance-=0.51 }
 				if kind==0x12 { label="SHOP" }
+				if kind==4 or kind==5 { image=-1; label="LADDER UP"; if kind==5 { label="LADDER DOWN" } }
 				self.Billboard(image,label,distance,lateral)
 			}
 		}
@@ -328,10 +342,11 @@ class View
 	fn Draw(s:session.State)
 	{
 		w=self.Window; w.Begin(uint32(0x151d1bff))
+		self.MaterialOffset=s.BaseNumber
 		w.Rect(8.0,8.0,1264.0,764.0,uint32(0x4a4b3dff))
 		w.Rect(16.0,16.0,1248.0,748.0,uint32(0x182220ff))
 		w.Text("CAPTIVE",28.0,27.0,30.0,ink)
-		w.Text("REMOTE DROID LINK / FIRST BASE",203.0,37.0,13.0,muted)
+		w.Text(format("DROID LINK / BASE {} / FLOOR {}",s.BaseNumber+1,session.FloorLevel(s,s.X,s.Y)),203.0,37.0,13.0,muted)
 		self.Button("SAVE",612.0,28.0,68.0); self.Button("LOAD",688.0,28.0,68.0)
 		self.Button("PAUSE",764.0,28.0,76.0); self.Button("ART",848.0,28.0,64.0)
 		fullscreen="FULLSCREEN"; if self.Window.IsFullscreen() { fullscreen="EXIT FULL" }
@@ -347,12 +362,13 @@ class View
 		if s.SabotagePhase==3 { w.Text("BASE SYSTEMS OFFLINE",984.0,172.0,12.0,amber) }
 		front=session.FrontCell(s); shop=front>=0 and (s.Objects[front]&127)==0x12
 		if shop { self.Button("STOCK",984.0,188.0,116.0); self.Button("SELL HELD",1108.0,188.0,124.0) }
-		else { self.Button("INTERACT  /  SPACE",984.0,188.0,248.0) }
+		else { label="INTERACT  /  SPACE"; if session.LadderTarget(s,s.Y*s.Width+s.X)>=0 { label="CLIMB  /  SPACE" }; self.Button(label,984.0,188.0,248.0) }
 		if self.Inventory >= 0
 		{
 			d=s.Droids[self.Inventory]
 			w.Text(format("{} / INVENTORY",d.Name),984.0,238.0,15.0,amber)
-			w.Text(format("COMBAT SKILL  {}  (provisional)",d.Skills[0]),984.0,264.0,12.0,muted)
+			skills=format("COMBAT SKILL  {}  (provisional)",d.Skills[0]); if s.BaseNumber>0 { skills=format("BRAWL {}  /  BLADE {}",d.Skills[0],d.Skills[1]) }
+			w.Text(skills,984.0,264.0,12.0,muted)
 			for row=0; row<7; row+=1
 			{
 				i=self.Page*7+row; if i>=len(d.Inventory) { break }
@@ -426,16 +442,23 @@ class View
 		}
 		if s.Escaped
 		{
-			w.Rect(184.0,220.0,608.0,174.0,uint32(0x071815ef))
-			w.Text("FIRST BASE COMPLETE",274.0,250.0,28.0,amber)
-			w.Text("Probe recovered. Generators destroyed.",280.0,300.0,16.0,ink)
-			w.Text("All surviving droids escaped.",316.0,332.0,16.0,muted)
+			w.Rect(184.0,220.0,608.0,204.0,uint32(0x071815ef))
+			title="SECOND BASE COMPLETE"; if s.BaseNumber==0 { title="SWAN / PROBE ROUTE" }
+			w.Text(title,260.0,248.0,26.0,amber)
+			w.Text("Probe recovered. Generators destroyed.",260.0,292.0,16.0,ink)
+			if s.BaseNumber==0
+			{
+				w.Text("Next destination: Base 2. Party and equipment retained.",230.0,326.0,14.0,muted)
+				self.Button("TRAVEL TO BASE 2  /  ENTER",324.0,368.0,328.0)
+			}
+			else { w.Text("Both bases complete. Save to keep your surviving party.",230.0,346.0,14.0,muted) }
 		}
 		w.Submit()
 	}
 	// Click returns an action for the application boundary to dispatch.
 	fn Click(s:session.State, x:float64, y:float64, button:int64, doubleClick:bool) string
 	{
+		if s.Escaped and s.BaseNumber==0 and inside(x,y,324.0,368.0,328.0,30.0) { ret "travel" }
 		if s.CursorCharge>0 and s.CameraIndex<0 and inside(x,y,804.0,132.0,128.0,30.0) { ret "spark" }
 		if len(s.Cameras)>0
 		{

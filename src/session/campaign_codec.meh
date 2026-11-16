@@ -1,0 +1,26 @@
+@mod session
+@inc json
+
+fn encodeCampaign(s:State,o:json.JsonValue)
+{
+	setNumber(o,"base",s.BaseNumber); setNumber(o,"entrance",s.Entrance)
+	o.Set("floorSections",integers(s.FloorSections)); o.Set("switchTargets",integers(s.SwitchTargets))
+}
+fn decodeCampaign(s:State,o:json.JsonValue) error
+{
+	// Version 0.1 saves contain only the first base.
+	if o.Get("base").IsNull()
+	{
+		s.Entrance=-1; if s.Width==64 { s.Entrance=30 }
+		s.FloorSections=new([]int64); for i=0; i<16; i+=1 { append(s.FloorSections,1) }
+		s.SwitchTargets=new([]int64); for tile=s.Tiles { append(s.SwitchTargets,-1) }
+		ret nil
+	}
+	base,e=number(o.Get("base"),0,65535); if e!=nil { ret e }; s.BaseNumber=base
+	entrance,e=number(o.Get("entrance"),-1,len(s.Tiles)-1); if e!=nil { ret e }; s.Entrance=entrance
+	floors,e=numbers(o.Get("floorSections"),16,1,6); if e!=nil { ret e }; s.FloorSections=floors
+	switches,e=numbers(o.Get("switchTargets"),len(s.Tiles),-1,len(s.Tiles)-1); if e!=nil { ret e }; s.SwitchTargets=switches
+	for target=switches
+	{ if target>=0 and (s.Objects[target]&127)!=0x15 and s.Fire[target]==0 { ret error("session save: switch target is not a door") } }
+	ret nil
+}
