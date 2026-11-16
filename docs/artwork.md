@@ -27,7 +27,9 @@ the original sloped reactor silhouette and top connector; `terminal.png` and
 [encounter screenshots](https://captive.atari.org/Environment/Encounters/Encounters.php)
 as design references, with the kit as their style reference. They preserve the
 plant creature, green-tunic/blue-trouser humanoid and pale robed keeper identities.
-All individual sprites use real alpha transparency. The kit's security-robot
+Runtime wall and sprite images are 1024×1024, downsampled from the generated
+1254×1254 masters at the user's request. Sprite alpha transparency is preserved;
+the user will handle the subsequent lossless ImageOptim pass. The kit's security-robot
 study is art direction only, not evidence of a robot encounter in the first base.
 
 Original palette changes, perspective composition and sprite placement remain
