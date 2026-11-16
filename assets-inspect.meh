@@ -1,0 +1,44 @@
+@inc os
+@inc src/assets
+
+fn run() error
+{
+	if len(argv) < 3 { ret error("usage: assets-inspect svx INPUT OUTPUT.wav | planar INPUT OUTPUT.ppm [PALETTE.rgb]") }
+	input, e = os.ReadfileBytes(argv[1]); if e != nil { ret e }
+	output:[]byte
+	if argv[0] == "svx"
+	{
+		if len(argv) != 3 { ret error("svx requires INPUT OUTPUT.wav") }
+		sound, err = assets.SVX(input); if err != nil { ret err }
+		output, e = assets.WAV(sound); if e != nil { ret e }
+	}
+	else if argv[0] == "palette"
+	{
+		if len(argv) != 3 { ret error("palette requires 64-byte INPUT OUTPUT.rgb") }
+		output, e = assets.Palette12(input); if e != nil { ret e }
+	}
+	else if argv[0] == "planar"
+	{
+		if len(argv) != 3 and len(argv) != 4 { ret error("planar requires INPUT OUTPUT.ppm [PALETTE.rgb]") }
+		palette = new([]byte)
+		if len(argv) == 4
+		{
+			palette, e = os.ReadfileBytes(argv[3]); if e != nil { ret e }
+		}
+		else
+		{
+			// Diagnostic grey only: no original colours are implied.
+			for i = 0; i < 32; i += 1
+			{
+				level = byte(i * 255 / 31)
+				append(palette, level); append(palette, level); append(palette, level)
+			}
+		}
+		output, e = assets.PPM(input, 320, 200, 5, palette); if e != nil { ret e }
+	}
+	else { ret error("unknown inspection mode") }
+	ret os.Writefile(argv[2], str(output))
+}
+
+e = run()
+if e != nil { eprintln("{}", e); exit(1) }

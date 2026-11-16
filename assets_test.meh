@@ -1,0 +1,99 @@
+@inc test
+@inc src/assets
+
+fn testPlanarOrdering(t:test.Tester)
+{
+	// Two contiguous planes: bit 7 is the left pixel, plane 0 the low bit.
+	data:[]byte = [0x80, 0x40, 0x40, 0x80]
+	pixels, e = assets.PlanarIndices(data, 8, 2, 2)
+	t.expect(e == nil, "planar accepted")
+	t.equal(len(pixels), 16, "size")
+	t.equal(int64(pixels[0]), 1, "low bitplane")
+	t.equal(int64(pixels[1]), 2, "high bitplane")
+	t.equal(int64(pixels[8]), 2, "next row high bitplane")
+	t.equal(int64(pixels[9]), 1, "next row low bitplane")
+	_, e = assets.PlanarIndices(data[:3], 8, 2, 2)
+	t.expect(e != nil, "truncation")
+	_, e = assets.PlanarIndices(data, 9, 2, 2)
+	t.expect(e != nil, "reject unaligned width")
+	_, e = assets.PlanarIndices(data, 8, 2, 9)
+	t.expect(e != nil, "reject too many planes")
+}
+
+fn svxFixture() []byte
+{
+	// FORM length 54; 20-byte VHDR at 20, odd ANNO plus pad, then BODY.
+	data:[]byte = [70,79,82,77, 0,0,0,54, 56,83,86,88,
+		86,72,68,82, 0,0,0,20,
+		0,0,0,3, 0,0,0,0, 0,0,0,0, 0x15,0xe0, 1,0, 0,1,0,0,
+		65,78,78,79, 0,0,0,1, 120,0,
+		66,79,68,89, 0,0,0,3, 0,128,255,0]
+	ret data
+}
+
+fn testSVXAndWAV(t:test.Tester)
+{
+	sample, e = assets.SVX(svxFixture())
+	t.expect(e == nil, "parse padded IFF chunks")
+	t.equal(sample.Rate, 5600, "native sample rate")
+	t.equal(len(sample.Samples), 3, "body length excludes padding")
+	wav, e = assets.WAV(sample)
+	t.expect(e == nil, "encode WAV")
+	t.equal(len(wav), 48, "WAV with odd sample pad")
+	t.equalStr(str(wav, 0, 4), "RIFF", "RIFF identifier")
+	t.equal(int64(wav[4]), 40, "RIFF size")
+	t.equal(int64(wav[40]), 3, "sample byte count")
+	t.equal(int64(wav[44]), 128, "signed zero to unsigned midpoint")
+	t.equal(int64(wav[45]), 0, "signed minimum")
+	t.equal(int64(wav[46]), 127, "signed minus one")
+}
+
+fn testSVXRejectsCorruption(t:test.Tester)
+{
+	data = svxFixture()
+	for size = 0; size < len(data); size += 1
+	{
+		_, e = assets.SVX(data[:size])
+		t.expect(e != nil, "reject every truncation")
+	}
+	data[35] = 1
+	_, e = assets.SVX(data)
+	t.expect(e != nil, "reject compressed 8SVX")
+	data = svxFixture(); data[32] = 0; data[33] = 0
+	_, e = assets.SVX(data)
+	t.expect(e != nil, "reject zero sample rate")
+}
+
+fn testPPMPalette(t:test.Tester)
+{
+	planar:[]byte = [128]
+	palette:[]byte = [1,2,3, 240,241,242]
+	ppm, e = assets.PPM(planar, 8, 1, 1, palette)
+	t.expect(e == nil, "palette accepted")
+	t.equalStr(str(ppm, 0, 11), "P6\n8 1\n255\n", "PPM header")
+	t.equal(int64(ppm[11]), 240, "selected red")
+	t.equal(int64(ppm[12]), 241, "selected green")
+	t.equal(int64(ppm[13]), 242, "selected blue")
+	t.equal(int64(ppm[14]), 1, "second pixel background")
+	_, e = assets.PPM(planar, 8, 1, 1, palette[:5])
+	t.expect(e != nil, "reject short palette")
+	_, e = assets.WAV(nil)
+	t.expect(e != nil, "reject missing sound")
+}
+
+fn testAmigaPalette(t:test.Tester)
+{
+	data = new([]byte)
+	for i = 0; i < 32; i += 1 { append(data, byte(0x0a)); append(data, byte(0xbc)) }
+	palette, e = assets.Palette12(data)
+	t.expect(e == nil, "valid Amiga palette")
+	t.equal(len(palette), 96, "RGB size")
+	t.equal(int64(palette[0]), 170, "red nibble")
+	t.equal(int64(palette[1]), 187, "green nibble")
+	t.equal(int64(palette[2]), 204, "blue nibble")
+	data[0] = 0x10
+	_, e = assets.Palette12(data)
+	t.expect(e != nil, "reject high colour bits")
+	_, e = assets.Palette12(data[:62])
+	t.expect(e != nil, "reject short palette")
+}

@@ -1,0 +1,141 @@
+@mod assets
+
+// New inspection code for original Amiga data. See docs/assets.md.
+
+// PlanarIndices converts contiguous Amiga bitplanes into one byte per pixel.
+fn PlanarIndices(data:[]byte, width:int64, height:int64, planes:int64) []byte, error
+{
+	if width < 1 or width > 4096 or height < 1 or height > 4096 or planes < 1 or planes > 8 or width % 8 != 0
+	{ ret nil, error("assets: invalid planar dimensions") }
+	stride = width / 8
+	planeSize = stride * height
+	if len(data) != planeSize * planes { ret nil, error("assets: planar byte count does not match dimensions") }
+	pixels = new([]byte)
+	for y = 0; y < height; y += 1
+	{
+		for x = 0; x < width; x += 1
+		{
+			index:int64 = 0
+			for plane = 0; plane < planes; plane += 1
+			{
+				bit = (int64(data[plane * planeSize + y * stride + x / 8]) >> (7 - x % 8)) & 1
+				index |= bit << plane
+			}
+			append(pixels, byte(index))
+		}
+	}
+	ret pixels, nil
+}
+
+// PPM creates a portable RGB inspection image from planar data and RGB triples.
+fn PPM(data:[]byte, width:int64, height:int64, planes:int64, palette:[]byte) []byte, error
+{
+	if planes < 1 or planes > 8 or len(palette) != (int64(1) << planes) * 3
+	{ ret nil, error("assets: invalid RGB palette") }
+	pixels, e = PlanarIndices(data, width, height, planes)
+	if e != nil { ret nil, e }
+	header = format("P6\n{} {}\n255\n", width, height)
+	output = strbytes(header)
+	for pixel = pixels
+	{
+		at = int64(pixel) * 3
+		append(output, palette[at]); append(output, palette[at+1]); append(output, palette[at+2])
+	}
+	ret output, nil
+}
+
+fn be16(data:[]byte, at:int64) int64 { ret int64(data[at]) * 256 + int64(data[at+1]) }
+fn be32(data:[]byte, at:int64) int64 { ret be16(data, at) * 65536 + be16(data, at+2) }
+
+// Sound contains a validated, uncompressed IFF 8SVX mono PCM sample.
+class Sound
+{
+	Rate:int64
+	Samples:[]byte
+}
+
+// SVX reads IFF 8SVX without guessing a playback rate or accepting compression.
+fn SVX(data:[]byte) Sound, error
+{
+	if len(data) < 12 or str(data, 0, 4) != "FORM" or str(data, 8, 4) != "8SVX"
+	{ ret nil, error("assets: not IFF 8SVX") }
+	end = be32(data, 4) + 8
+	if end < 12 or end > len(data) { ret nil, error("assets: truncated IFF FORM") }
+	result = new Sound
+	voice = false; body = false
+	at:int64 = 12
+	for at < end
+	{
+		if end - at < 8 { ret nil, error("assets: truncated IFF chunk header") }
+		kind = str(data, at, 4); size = be32(data, at+4); at += 8
+		if size > end - at { ret nil, error("assets: truncated IFF chunk") }
+		if kind == "VHDR"
+		{
+			if voice or size < 20 { ret nil, error("assets: invalid VHDR chunk") }
+			voice = true; result.Rate = be16(data, at+12)
+			if result.Rate == 0 or data[at+14] != 1 or data[at+15] != 0 { ret nil, error("assets: invalid rate or unsupported 8SVX compression") }
+		}
+		if kind == "CHAN"
+		{
+			if size != 4 { ret nil, error("assets: invalid CHAN chunk") }
+			channel = be32(data, at)
+			if channel != 2 and channel != 4 { ret nil, error("assets: unsupported channel mode") }
+		}
+		if kind == "BODY"
+		{
+			if body or size == 0 { ret nil, error("assets: invalid BODY chunk") }
+			body = true; result.Samples = data[at:at+size]
+		}
+		if kind == "CHAN" and (size != 4 or be32(data, at) != 2)
+		{ ret nil, error("assets: only mono 8SVX is supported") }
+		at += size + size % 2
+		if at > end { ret nil, error("assets: missing IFF pad byte") }
+	}
+	if !voice or !body { ret nil, error("assets: missing VHDR or BODY") }
+	ret result, nil
+}
+
+fn le16(output:[]byte, value:int64)
+{
+	append(output, byte(value & 255)); append(output, byte((value >> 8) & 255))
+}
+fn le32(output:[]byte, value:int64)
+{
+	le16(output, value); le16(output, value >> 16)
+}
+fn textBytes(output:[]byte, text:string) { for b = strbytes(text) { append(output, b) } }
+
+// WAV exports signed 8SVX PCM as unsigned 8-bit mono RIFF PCM.
+fn WAV(sound:Sound) []byte, error
+{
+	if sound == nil { ret nil, error("assets: missing sound") }
+	if sound.Rate < 1 or sound.Rate > 65535 or len(sound.Samples) == 0 or len(sound.Samples) > 67108864
+	{ ret nil, error("assets: invalid mono sample") }
+	if sound == nil { ret nil, error("assets: no sound") }
+	if sound.Rate < 1 or sound.Rate > 65535 or len(sound.Samples) == 0 or len(sound.Samples) > 16777216
+	{ ret nil, error("assets: invalid PCM sound") }
+	output = new([]byte)
+	size = len(sound.Samples); padded = size + size % 2
+	textBytes(output, "RIFF"); le32(output, 36 + padded); textBytes(output, "WAVEfmt "); le32(output, 16)
+	le16(output, 1); le16(output, 1); le32(output, sound.Rate); le32(output, sound.Rate); le16(output, 1); le16(output, 8)
+	textBytes(output, "data"); le32(output, size)
+	for sample = sound.Samples { append(output, sample ^ 128) }
+	if size % 2 != 0 { append(output, byte(0)) }
+	ret output, nil
+}
+
+// Palette12 expands 32 big-endian Amiga 0RGB colour registers to RGB triples.
+fn Palette12(data:[]byte) []byte, error
+{
+	if len(data) != 64 { ret nil, error("assets: expected 32 Amiga colour words") }
+	output = new([]byte)
+	for at = 0; at < 64; at += 2
+	{
+		value = be16(data, at)
+		if value > 4095 { ret nil, error("assets: invalid Amiga colour word") }
+		append(output, byte(((value >> 8) & 15) * 17))
+		append(output, byte(((value >> 4) & 15) * 17))
+		append(output, byte((value & 15) * 17))
+	}
+	ret output, nil
+}
