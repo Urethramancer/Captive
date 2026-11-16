@@ -24,6 +24,13 @@ arguments from an unrelated directory, renames a droid inline, saves, and exits
 using both close and Command-Q. It uses isolated saves and a test-only injected
 driver. These checks do not verify final artwork or audible sound fidelity.
 
+After `base-playthrough --campaign` (or a completed first-base run),
+`tools/test-launch.sh --campaign` also loads the completed first-base save,
+uses Enter to travel, verifies carried body condition, moves away from the
+second entrance and restores its own checkpoint through the toolbar.
+The injected driver waits for submitted game frames between inputs, so window
+closure cannot overtake a pending save on a slower frame.
+
 ## C interface
 
 All calls in `native/captive_native.h` run on the process's main thread. Retain
