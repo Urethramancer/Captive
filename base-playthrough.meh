@@ -42,8 +42,8 @@ class Runner
 			self.Transcript+="save\t0\t0\t0\nload\t0\t0\t0\n"
 			println("Saved and restored active combat after {} commands",self.Commands)
 		}
-		self.State.SoundEvents=new([]string)
-		if self.Twin!=nil { self.Twin.SoundEvents=new([]string) }
+		_ = session.DrainSounds(self.State)
+		if self.Twin!=nil { _ = session.DrainSounds(self.Twin) }
 		ret nil
 	}
 	fn Face(direction:int64) error
@@ -92,8 +92,8 @@ class Runner
 		self.Transcript+=format("tick\t0\t0\t{}\n",ticks)
 		for i=0;i<ticks;i+=1 { session.Tick(self.State); if self.Twin!=nil { session.Tick(self.Twin) } }
 		if self.Twin!=nil and session.Encode(self.State)!=session.Encode(self.Twin) { ret error("playthrough: restored ticks diverged") }
-		self.State.SoundEvents=new([]string)
-		if self.Twin!=nil { self.Twin.SoundEvents=new([]string) }
+		_ = session.DrainSounds(self.State)
+		if self.Twin!=nil { _ = session.DrainSounds(self.Twin) }
 		ret nil
 	}
 }
@@ -171,6 +171,7 @@ fn travel(r:Runner,x:int64,y:int64) error
 		if (r.State.Objects[front]&127)==0x21
 		{ e=r.Do("attack",0,1,18);if e!=nil { ret e } }
 		e=r.Fight(front%r.State.Width,front/r.State.Width);if e!=nil { ret e }
+		if r.State.MoveTimer>0 { e=r.Advance(r.State.MoveTimer);if e!=nil { ret e } }
 		e=r.Do("move",0,0,4);if e!=nil { ret e }
 		e=recharge(r);if e!=nil { ret e }
 	}
@@ -191,7 +192,9 @@ fn play(r:Runner) error
 	e=travel(r,23,2);if e!=nil { ret e }
 	e=r.Face(1);if e!=nil { ret e }
 	e=r.Do("interact",0,0,0);if e!=nil { ret e }
+	saleGold=r.State.Credits
 	e=r.Do("sell",0,3,0);if e!=nil { ret e }
+	if r.State.Credits!=saleGold+200 { ret error("playthrough: Ratt message sale did not pay verified 200 gold") }
 	for droid=0;droid<4;droid+=1
 	{
 		for part=0;part<6;part+=1
@@ -207,7 +210,13 @@ fn play(r:Runner) error
 		if offer.X==24 and offer.Y==2 and offer.Code==31 and offer.Quality==0 { row=index;break }
 	}
 	if row<0 { ret error("playthrough: recovered shop lacks basic knuckle-duster") }
+	purchaseGold=r.State.Credits
 	e=r.Do("buy",1,row,0);if e!=nil { ret e }
+	if r.State.Credits!=purchaseGold-49 or len(r.State.Droids[1].Inventory)!=1
+	{ ret error("playthrough: verified knuckle-duster purchase did not consume 49 gold") }
+	purchased=r.State.Droids[1].Inventory[0]
+	if purchased.Code!=31 or purchased.Quality!=0 or purchased.Quantity!=1
+	{ ret error("playthrough: purchased equipment differs from recovered offer") }
 	if r.State.Droids[1].Skills[0]>=9 { e=r.Do("equip-left",1,0,0);if e!=nil { ret e } }
 	e=r.Do("pause",0,0,0);if e!=nil { ret e }
 	frozen=session.Encode(r.State)
@@ -221,6 +230,16 @@ fn play(r:Runner) error
 	e=r.Do("equip-right",0,-1,0);if e!=nil { ret e }
 	if !r.State.Sabotaged { ret error("playthrough: generator interaction did not sabotage") }
 	e=travel(r,30,1);if e!=nil { ret e }
+	waited:int64=0
+	for waited<1200 and (r.State.SabotagePhase<2 or r.State.FireSteps<1)
+	{
+		ticks:int64=60
+		if r.State.SabotagePhase>=2 { ticks=6 }
+		e=r.Advance(ticks);if e!=nil { ret e };waited+=ticks
+	}
+	if r.State.SabotagePhase<2 or r.State.FireSteps<1
+	{ ret error("playthrough: reactor blast did not shut down the base and propagate") }
+	println("Blast propagated {} step(s) before escape",r.State.FireSteps)
 	e=r.Face(0);if e!=nil { ret e }
 	e=r.Do("interact",0,0,0);if e!=nil { ret e }
 	if !r.State.Escaped or !r.State.Probe or !r.State.Sabotaged { ret error("playthrough: base objectives incomplete") }
